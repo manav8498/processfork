@@ -8,56 +8,61 @@
 
 ## Where I am right now
 
-Phase 0 (bootstrap) is functionally complete on this machine:
-- Cargo workspace with all 10 crates compiles clean (`cargo check --workspace` —
-  zero warnings).
-- `pf-core` has typed errors, `Digest256` (SHA-256, OCI form), `BlobStore`
-  trait, and the v1 `.pfimg` manifest schema. 5/5 unit tests pass.
-- `pf` CLI binary renders `--help` listing all 12 subcommands; each subcommand
-  exits 2 with a "scaffold only" message until Phase 8 wires it up.
-- Agent infra (CLAUDE.md, agent_docs/*, .claude/agents/*, .claude/skills/*,
-  .claude/hooks/*) is being written; see "What's next" below.
+Phases 0 (bootstrap) and 1 (core engine, Rust) are complete and tagged.
+Phase 2 (world layer) is starting.
+
+- Workspace is 10 crates + 1 example, clean fmt/clippy/test on macOS arm64.
+- `pf-core` is the load-bearing crate: `Digest256`, `Manifest` v1,
+  `FsBlobStore` (sharded zstd-19 CAS, on-read re-hash), `MemBlobStore`,
+  `PfStore` (CAS + manifest catalog), `Snapshotter` (atomic 4-layer with
+  `thread::scope`), `fixture::*` synthetic captures.
+- 16 tests pass (12 unit + 3 integration + 1 doctest).
+- `examples/01-hello-fork` runs end-to-end: snapshot in **8 ms**, 614 B
+  growth on identical-content second snapshot (CoW dedup proven).
 
 ## What's next (top of stack)
 
-1. Finish writing all `agent_docs/` subsystem specs (architecture, feature-
-   spec, cache-layer, model-layer, world-layer, effects-layer, merge-protocol,
-   cli-spec, registry-spec, 7× integration-*, benchmarks, release-checklist).
-2. Write the five sub-agent definitions in `.claude/agents/`.
-3. Write the five skills in `.claude/skills/`.
-4. Write the three hooks in `.claude/hooks/` and ensure they're executable.
-5. Write SECURITY.md, CONTRIBUTING.md, CODE_OF_CONDUCT.md.
-6. Make the first commit `feat: bootstrap workspace and agent infrastructure`.
-7. Run the qa+security+perf gate (sub-agents). If PASS, tag `phase-0-complete`
-   and flip phase 0 → done, phase 1 → in_progress in claude-progress.json.
-8. Begin Phase 1 (`pf-core` real impl): on-disk CAS with sharded zstd-19 blobs,
-   atomic snapshot orchestrator, end-to-end test that snapshots a synthetic
-   four-layer fixture in <500 ms.
+1. **Phase 2 — world layer.** In `crates/pf-world/`:
+   - `Snapshot` trait with concrete impls per filesystem backend.
+   - `OverlayfsCapture` (Linux, gated by `cfg(target_os = "linux")`).
+   - `ApfsCloneCapture` (macOS, via `nix::sys::clonefile` or shelling out
+     to `cp -c`).
+   - `WalkFsCapture` portable fallback (rayon-parallel hashing, mtime+size
+     pre-filter).
+   - `EnvCapture` (`std::env::vars()` + cwd, with `--scrub-env` regex).
+   - `ProcsCapture` — Linux: shell out to `criu dump`; macOS: write the
+     `unsupported_on: darwin` placeholder per agent_docs/world-layer.md.
+   - `BrowserCapture` (CDP) — stub for v1; real impl behind a feature flag.
+2. Replace the synthetic `FixtureWorldCapture` with a real `WalkFsCapture`
+   over a temp directory in the world-layer integration test.
+3. Wire the new `WorldCapture` into `Snapshotter` via the existing
+   `LayerCapture` trait.
+4. Examples/02 (12-way parallel) starts after Phase 6 (merge engine) lands;
+   examples/03+ require GPU; document those gates clearly in their READMEs.
 
 ## Blockers
 
-- None yet. Note assumption A-003: actual publish to PyPI/npm/crates.io/GHCR
-  needs operator-supplied tokens; the v1.0 ship gate from a fresh env is
-  blocked on operator action there. The workflows themselves are not blocked.
+- None. Phase 2 has no external dependencies; CRIU subprocess capture is
+  Linux-only and will be `#[cfg(target_os = "linux")]`-gated, with the macOS
+  build host emitting the documented "unsupported_on: darwin" placeholder.
 
 ## Recently completed
 
-- Initialized git repo (`main` branch).
-- Created the §4.1 directory layout.
-- Wrote workspace `Cargo.toml` (edition 2024, MSRV 1.85, shared deps).
-- Wrote 10 crate stubs that compile clean (no warnings).
-- Wrote `pf-core::digest::Digest256`, `pf-core::manifest::*`, `pf-core::cas::BlobStore` trait, typed errors.
-- Wrote `pf` CLI scaffold with all 12 subcommands and clap completions wired.
+- Phase 0: workspace skeleton, agent infrastructure, first commit + tag.
+- Phase 1: real `FsBlobStore` (sharded, zstd-19, atomic, corruption-detecting),
+  `PfStore`, `Snapshotter`, `fixture::*`, integration tests, hello-fork
+  example. Snapshot p99 = 8 ms vs 500 ms budget.
 
 ## Files most likely to need editing in the next session
 
-- `crates/pf-core/src/cas.rs` — implement `FsBlobStore` (sharded directory,
-  zstd-19 compression, atomic write via temp+rename).
-- `crates/pf-core/src/snapshot.rs` (new) — `Snapshotter` orchestrating the
-  four layer captures into a single `.pfimg`.
-- `examples/01-hello-fork/` (new) — first end-to-end example for the
-  Phase-1 gate.
-- `claude-progress.json` — flip current_phase to 1 once gate passes.
+- `crates/pf-world/src/lib.rs` — re-architect from Phase-0 stub to module tree.
+- `crates/pf-world/src/walk.rs` (new) — portable rayon-parallel FS walker.
+- `crates/pf-world/src/apfs.rs` (new, macOS-only) — `clonefile(2)` capture.
+- `crates/pf-world/src/overlayfs.rs` (new, linux-only) — overlayfs capture.
+- `crates/pf-world/src/env.rs` (new) — env-var capture with `--scrub-env`.
+- `crates/pf-world/src/procs.rs` (new) — CRIU dump on Linux, stub on macOS.
+- `crates/pf-world/tests/` — round-trip tests for each backend.
+- `claude-progress.json` — flip phase 2 to done when gate passes.
 
 ## Context-window discipline reminders
 

@@ -11,6 +11,9 @@ members = [
     "crates/pf-cli",
     "crates/pf-py",
     "crates/pf-ts",
+    # Examples are workspace members so `cargo build --workspace` covers them,
+    # but excluded from default-members so `cargo check` stays fast.
+    "examples/01-hello-fork",
 ]
 default-members = [
     "crates/pf-core",

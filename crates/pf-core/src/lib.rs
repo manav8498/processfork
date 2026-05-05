@@ -12,6 +12,9 @@
 pub mod cas;
 pub mod digest;
 pub mod error;
+pub mod fixture;
 pub mod manifest;
+pub mod snapshot;
+pub mod store;
 
 pub use error::{Error, Result};
