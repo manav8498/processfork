@@ -1,0 +1,21 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "processfork-vllm"
+version = "0.1.0.dev0"
+description = "ProcessFork plugin for vLLM ≥0.10 — paged-KV-cache snapshot/restore via batch-invariant kernels."
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.9"
+authors = [{ name = "ProcessFork Authors" }]
+dependencies = [
+    "processfork>=0.1.0.dev0",
+]
+
+[project.optional-dependencies]
+vllm = ["vllm>=0.10"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["processfork_vllm"]

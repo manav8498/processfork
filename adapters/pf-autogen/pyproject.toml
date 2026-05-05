@@ -1,0 +1,19 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "processfork-autogen"
+version = "0.1.0.dev0"
+description = "ProcessFork integration for AutoGen 0.4+ — atomic group-chat snapshots."
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.9"
+authors = [{ name = "ProcessFork Authors" }]
+dependencies = ["processfork>=0.1.0.dev0"]
+
+[project.optional-dependencies]
+autogen = ["autogen-agentchat>=0.4"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["processfork_autogen"]

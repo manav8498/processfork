@@ -6,6 +6,78 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added — Phase 10 (integration adapters)
+
+All seven first-party adapters from `agent_docs/feature-spec.md` M5 ship
+as their own pure-Python packages under `adapters/<name>/`. Three are
+fully wired end-to-end against the Phase-7 SDK; four scaffold the
+trait + URL parsing + auth-token plumbing with `NotImplementedError`
+on the GPU/network paths until v1.0.1 lands them.
+
+**Fully wired (build-host testable)**
+
+- `adapters/pf-claude-code/` — `processfork-claude-code` Python pkg.
+  `SessionRecorder` accumulates messages + tool calls and snapshots
+  via the SDK; `ToolClassifier` provides safe-by-default tool →
+  side-effect-class mapping (unknown tools → `Irreversible`);
+  `install_slash_commands` drops `/snapshot`, `/fork`, `/merge`
+  command files into `~/.claude/commands/processfork/`. The
+  `pf-wrap-claude` CLI installs them. **9 smoke tests + runnable
+  example 03**.
+- `adapters/pf-langgraph/` — `processfork-langgraph` Python pkg.
+  `ProcessForkCheckpointer` implements the duck-typed
+  `BaseCheckpointSaver` surface (no hard `langgraph` dep at import);
+  every checkpoint becomes a `.pfimg`. `fork_thread` shells out to
+  `pf fork` for manifest-level branching. **5 smoke tests + runnable
+  example 04 (3 checkpoints + 4 forks via real CLI)**.
+- `adapters/pf-openinterpreter/` — `processfork-openinterpreter` pkg.
+  `WrappedInterpreter` adds `snapshot(name)` / `checkout(name)` to
+  any OpenInterpreter-shaped object; `wrap_interpreter` factory.
+  Tool calls tap an in-memory ledger. **5 smoke tests + runnable
+  example 05 (snapshot → destructive op → checkout restored
+  byte-identical)**.
+
+**Scaffolded (trait + auth + clear-error stubs; v1.0.1 wires the live FFI)**
+
+- `adapters/pf-vllm/` — `processfork-vllm` pkg. `VllmCachePager`
+  implements the Python side of `pf-cache::CachePager`; `VllmPlugin`
+  registers `/v1/processfork/{snapshot,fork,checkout,merge}` HTTP
+  handlers. Live FFI into vLLM's `worker.cache_engine` deferred to
+  v1.0.1; current handlers return `501` with a clear pointer.
+  **5 smoke tests + 1 GPU-gated test (skips without `$PF_HAS_GPU=1`)
+  + runnable example 06 (skip-aware)**.
+- `adapters/pf-sglang/` — `processfork-sglang` pkg. Sister
+  implementation to vLLM, mapping onto SGLang's `mem_pool` /
+  `RadixCache`. **4 smoke tests + 1 GPU-gated test + example 07**.
+- `adapters/pf-autogen/` — `processfork-autogen` pkg.
+  `ProcessForkRuntime` tracks per-agent message + tool-call state;
+  `snapshot` flattens with `[agent]` attribution prefixes; `fork`
+  shells out to `pf fork`. **4 smoke tests** (1 dep-gated on `pf` on
+  PATH).
+- `adapters/pf-crewai/` — `processfork-crewai` pkg.
+  `ProcessForkMemory` implements CrewAI's memory protocol; every
+  `save()` becomes a snapshot, `checkout(cid)` restores the world
+  layer. **4 smoke tests**.
+
+**Examples** (all 8 from `agent_docs/feature-spec.md` M9 now present):
+
+- `examples/01-hello-fork/` (Phase 1) — synthetic 4-layer snapshot.
+- `examples/02-cli-snapshot/` (Phase 8) — full CLI transcript.
+- `examples/03-claude-code-fork/` — Claude Code adapter end-to-end.
+- `examples/04-langgraph-checkpoint/` — checkpointer + 4-way fork.
+- `examples/05-openinterpreter-undo/` — destructive-op undo round-trip.
+- `examples/06-vllm-bit-exact/` — skip-aware GPU-gated harness.
+- `examples/07-sglang-prefix-share/` — skip-aware GPU-gated harness.
+- `examples/08-rl-rollout-fabric/` — N-way fan-out + winner merge,
+  pure synthetic-fixture (runs on build host).
+
+**Test totals after Phase 10**
+
+- 154 Rust tests
+- 5 Python SDK + 5 TypeScript SDK smoke tests (Phase 7)
+- 36 adapter smoke tests + 2 GPU-gated skips (Phase 10)
+- = **200 tests across the workspace**
+
 ### Added — Phase 9 (registry)
 
 - `pf-registry::ImageRef`: parser for the five supported URL schemes —
