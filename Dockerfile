@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 # Multi-stage Dockerfile producing a slim container with the `pf` CLI.
-# Built and pushed to ghcr.io/<owner>/processfork:<tag> on release.
+# Built and pushed to ghcr.io/manav8498/processfork:<tag> on release.
 
 FROM rust:1.88-slim AS build
 WORKDIR /src
@@ -11,7 +11,7 @@ COPY examples ./examples
 RUN cargo build --release -p pf-cli
 
 FROM debian:bookworm-slim
-LABEL org.opencontainers.image.source="https://github.com/processfork/processfork"
+LABEL org.opencontainers.image.source="https://github.com/manav8498/processfork"
 LABEL org.opencontainers.image.description="ProcessFork — fork() for AI agents"
 LABEL org.opencontainers.image.licenses="MIT"
 RUN apt-get update && apt-get install -y --no-install-recommends \

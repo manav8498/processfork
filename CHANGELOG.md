@@ -29,7 +29,7 @@ host, four scaffolded with explicit v1.0.1 milestones).
   - Publishes `@processfork/sdk` to npm (`napi build` + `npm
     publish`).
   - Builds + pushes the multi-arch Docker image to
-    `ghcr.io/<owner>/processfork:<tag>` + `:latest`.
+    `ghcr.io/manav8498/processfork:<tag>` + `:latest`.
 - `Dockerfile`: 2-stage build producing a slim Debian-based image
   with the `pf` binary on PATH; mounts `/data/store` as a volume.
 - `landing/`: single-page Tailwind landing site at `landing/index.html`

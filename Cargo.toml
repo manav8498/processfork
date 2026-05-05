@@ -40,8 +40,8 @@ edition = "2024"
 rust-version = "1.88"
 license = "MIT"
 repository = "https://github.com/manav8498/processfork"
-homepage = "https://processfork.dev"
-authors = ["ProcessFork Authors"]
+homepage = "https://github.com/manav8498/processfork"
+authors = ["manav8498 <manavpatel91570@gmail.com>"]
 readme = "README.md"
 
 [workspace.lints.rust]

@@ -17,5 +17,5 @@ Four threat categories:
 4. **Unsafe Rust** — only `pf-cache`'s GPU page-hashing is expected
    to need it; every `unsafe` block is reviewed and justified.
 
-Reporting: **security@processfork.dev** or a GitHub Security
-Advisory.
+Reporting: open a private
+[GitHub Security Advisory](https://github.com/manav8498/processfork/security/advisories/new).

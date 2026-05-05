@@ -1,6 +1,6 @@
 # landing/
 
-Single-page static landing site, served at <https://processfork.dev>
+Single-page static landing site, served at <https://github.com/manav8498/processfork>
 via GitHub Pages from the `landing/` directory.
 
 Stack: HTML + Tailwind CDN (zero build step). Total payload ≈ 8 KB

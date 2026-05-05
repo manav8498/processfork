@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "description": "ProcessFork — fork() for AI agents (TypeScript SDK).",
   "license": "MIT",
-  "homepage": "https://processfork.dev",
+  "homepage": "https://github.com/manav8498/processfork",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/manav8498/processfork.git",

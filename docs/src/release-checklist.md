@@ -30,7 +30,7 @@
 - [ ] `cargo publish` for each of the 8 publishable crates.
 - [ ] `maturin publish` for `processfork` on PyPI.
 - [ ] `npm publish` for `@processfork/sdk`.
-- [ ] `docker buildx push ghcr.io/<owner>/processfork:1.0.0`.
+- [ ] `docker buildx push ghcr.io/manav8498/processfork:1.0.0`.
 - [ ] All 7 adapter pkgs pushed to PyPI as `processfork-<adapter>`.
 
 ## Post

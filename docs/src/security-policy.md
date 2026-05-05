@@ -4,9 +4,14 @@
 
 ## Reporting
 
-Email **security@processfork.dev** or open a GitHub Security
-Advisory. We acknowledge within 72 hours; we ship a fix or
-mitigation within 30 days for high-severity issues.
+Open a private [GitHub Security Advisory][adv] for this repo. The
+maintainer is notified immediately and the conversation stays
+confidential until a fix is ready.
+
+[adv]: https://github.com/manav8498/processfork/security/advisories/new
+
+We acknowledge within 72 hours and ship a fix or mitigation within
+30 days for high-severity issues.
 
 ## Threat model
 

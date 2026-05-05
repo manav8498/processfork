@@ -36,7 +36,7 @@ Every box must be checkable against a real artifact, not a unit test.
 - [ ] Python SDK on PyPI (`pip install processfork`).
 - [ ] TypeScript SDK on npm (`npm install @processfork/sdk`).
 - [ ] Rust crate on crates.io (`cargo add processfork`).
-- [ ] Docker image on GHCR (`ghcr.io/<owner>/processfork:1.0.0`).
+- [ ] Docker image on GHCR (`ghcr.io/manav8498/processfork:1.0.0`).
 
 ## M4 — Registry adapters
 

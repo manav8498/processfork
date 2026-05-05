@@ -42,7 +42,7 @@ follows. Every item must be ✅ and verifiable from a fresh clone.
       crates.io.
 - [ ] `maturin publish` from `crates/pf-py/` → PyPI.
 - [ ] `npm publish` from `crates/pf-ts/` → npm.
-- [ ] `docker buildx push ghcr.io/<owner>/processfork:1.0.0`.
+- [ ] `docker buildx push ghcr.io/manav8498/processfork:1.0.0`.
 
 ## Post
 
@@ -50,6 +50,6 @@ follows. Every item must be ✅ and verifiable from a fresh clone.
 - [ ] `pip install processfork` from a fresh venv works.
 - [ ] `npm install @processfork/sdk` from a fresh node project works.
 - [ ] Landing page deployed to GitHub Pages.
-- [ ] mdBook deployed to docs.processfork.dev (or GitHub Pages subpath).
+- [ ] mdBook deployed to docs.github.com/manav8498/processfork (or GitHub Pages subpath).
 - [ ] Demo video uploaded to README.
 - [ ] Announce on X / HN / r/MachineLearning (operator-driven).

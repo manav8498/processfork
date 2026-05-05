@@ -20,5 +20,6 @@ agent did the work.
 
 ## Code of conduct
 
-Contributor Covenant v2.1. Report incidents to
-**conduct@processfork.dev**.
+Contributor Covenant v2.1. See
+[CODE_OF_CONDUCT.md](https://github.com/manav8498/processfork/blob/main/CODE_OF_CONDUCT.md)
+for how to report.

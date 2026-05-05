@@ -9,7 +9,7 @@ description = "ProcessFork memory adapter for CrewAI ≥0.130 — time-travel de
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.9"
-authors = [{ name = "ProcessFork Authors" }]
+authors = [{ name = "manav8498", email = "manavpatel91570@gmail.com" }]
 dependencies = ["processfork>=1.0.0"]
 
 [project.optional-dependencies]

@@ -9,7 +9,7 @@ description = "fork() for AI agents — snapshot, branch, and merge live agent s
 readme = "../../README.md"
 license = { text = "MIT" }
 requires-python = ">=3.9"
-authors = [{ name = "ProcessFork Authors" }]
+authors = [{ name = "manav8498", email = "manavpatel91570@gmail.com" }]
 keywords = ["llm", "agents", "snapshot", "fork", "ai"]
 classifiers = [
     "Development Status :: 3 - Alpha",
@@ -25,10 +25,11 @@ classifiers = [
 ]
 
 [project.urls]
-Homepage      = "https://processfork.dev"
+Homepage      = "https://github.com/manav8498/processfork"
 Repository    = "https://github.com/manav8498/processfork"
-Documentation = "https://processfork.dev/docs"
+Documentation = "https://github.com/manav8498/processfork/tree/main/docs"
 Issues        = "https://github.com/manav8498/processfork/issues"
+Changelog     = "https://github.com/manav8498/processfork/blob/main/CHANGELOG.md"
 
 [tool.maturin]
 module-name = "processfork._pf_py"

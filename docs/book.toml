@@ -1,6 +1,6 @@
 [book]
 title = "ProcessFork"
-authors = ["ProcessFork Authors"]
+authors = ["manav8498 <manavpatel91570@gmail.com>"]
 description = "fork() for AI agents — snapshot, branch, and merge live agent state."
 language = "en"
 src = "src"
