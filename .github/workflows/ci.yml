@@ -38,7 +38,7 @@ jobs:
       - name: test
         run: cargo test --workspace
       - name: build CLI release
-        run: cargo build --release -p pf-cli
+        run: cargo build --release -p processfork
 
   coverage:
     name: coverage

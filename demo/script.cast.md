@@ -4,7 +4,7 @@ Operator-runs-it. Records to `demo/script.cast` (asciinema format).
 
 ## Prereqs
 
-- `pf` binary built and on PATH (`cargo build --release -p pf-cli`).
+- `pf` binary built and on PATH (`cargo build --release -p processfork`).
 - `asciinema` installed (`brew install asciinema` or
   `pip install asciinema`).
 - A clean shell with `PS1='$ '`.

@@ -39,8 +39,8 @@ jobs:
         with:
           targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@v2
-      - name: cargo build --release -p pf-cli
-        run: cargo build --release --target ${{ matrix.target }} -p pf-cli
+      - name: cargo build --release -p processfork
+        run: cargo build --release --target ${{ matrix.target }} -p processfork
       - name: stage binary
         run: |
           set -e
@@ -155,7 +155,7 @@ jobs:
       - run: cargo publish -p pf-effects --token "$CARGO_REGISTRY_TOKEN"
       - run: cargo publish -p pf-merge   --token "$CARGO_REGISTRY_TOKEN"
       - run: cargo publish -p pf-registry --token "$CARGO_REGISTRY_TOKEN"
-      - run: cargo publish -p pf-cli     --token "$CARGO_REGISTRY_TOKEN"
+      - run: cargo publish -p processfork     --token "$CARGO_REGISTRY_TOKEN"
 
   # ----------------- PyPI -----------------
   publish-pypi:

@@ -22,7 +22,7 @@ two registry/CLI crates:
 | `pf-effects`  | HMAC-chained tool-call ledger + replay policy         |
 | `pf-merge`    | Three-way merge engine                                |
 | `pf-registry` | File / HF / S3 / IPFS / OCI adapters                  |
-| `pf-cli`      | The `pf` binary                                       |
+| `processfork`    | The `pf` CLI binary                                       |
 | `pf-py`       | pyo3 bindings (powers `processfork` on PyPI)          |
 | `pf-ts`       | napi-rs bindings (powers `@processfork/sdk` on npm)   |
 

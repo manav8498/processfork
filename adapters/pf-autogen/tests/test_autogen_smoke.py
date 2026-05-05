@@ -43,7 +43,7 @@ def test_snapshot_flattens_per_agent_attribution(tmp_path: Path) -> None:
 
 def test_fork_via_cli(tmp_path: Path) -> None:
     if not shutil.which("pf"):
-        pytest.skip("`pf` binary not on PATH; build with cargo build --release -p pf-cli")
+        pytest.skip("`pf` binary not on PATH; build with cargo build --release -p processfork")
     fs_root = tmp_path / "fs"
     fs_root.mkdir()
     rt = processfork_runtime(tmp_path / "store", fs_root=fs_root)

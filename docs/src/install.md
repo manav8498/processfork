@@ -24,7 +24,7 @@ git clone https://github.com/manav8498/processfork
 cd processfork
 
 # Rust workspace:
-cargo build --release -p pf-cli
+cargo build --release -p processfork
 ./target/release/pf --help
 
 # Python SDK (needs maturin in a venv):

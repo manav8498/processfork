@@ -51,7 +51,7 @@ def test_fork_thread_via_cli(tmp_path: Path) -> None:
     import shutil
 
     if not shutil.which("pf"):
-        pytest.skip("`pf` binary not on PATH; build with `cargo build --release -p pf-cli` and add target/release to PATH")
+        pytest.skip("`pf` binary not on PATH; build with `cargo build --release -p processfork` and add target/release to PATH")
     cp = ProcessForkCheckpointer(tmp_path / "store")
     cp.put("forkme", {"step": 0})
     forks = fork_thread(cp, "forkme", n=3, explore="explore")

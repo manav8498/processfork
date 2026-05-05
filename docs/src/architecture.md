@@ -76,5 +76,5 @@ on the SDKs (`pf-py` / `pf-ts`), never directly on the inner crates.
 | `pf-effects`     | HMAC-chained tool-call ledger + replay policy         |
 | `pf-merge`       | Three-way merge engine across all four layers         |
 | `pf-registry`    | File / HF / S3 / IPFS / OCI adapters                  |
-| `pf-cli`         | The `pf` binary                                       |
+| `processfork`    | The `pf` CLI binary                                       |
 | `pf-py`, `pf-ts` | Python (pyo3) and TypeScript (napi-rs) bindings       |

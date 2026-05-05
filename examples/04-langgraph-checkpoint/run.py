@@ -41,7 +41,7 @@ def main() -> None:
             print(f"│   {f}")
     else:
         print("│ skipped fork_thread: `pf` binary not on PATH")
-        print("│   (build with `cargo build --release -p pf-cli`)")
+        print("│   (build with `cargo build --release -p processfork`)")
 
     print("└─ ✓ checkpointer round-tripped 3 checkpoints + spawned forks")
     # Expose `pf` so users can poke at the manifests via the CLI.

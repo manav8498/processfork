@@ -14,7 +14,7 @@
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
 PF=${PF:-./target/release/pf}
-test -x "$PF" || cargo build --release -p pf-cli
+test -x "$PF" || cargo build --release -p processfork
 
 STORE_A=$(mktemp -d)
 STORE_B=$(mktemp -d)

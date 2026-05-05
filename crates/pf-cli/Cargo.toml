@@ -1,6 +1,10 @@
 [package]
-name = "pf-cli"
-description = "ProcessFork CLI (`pf`)"
+# Crate name is `processfork` (what `cargo install processfork` looks
+# up); the binary it produces is still named `pf` (see [[bin]] below).
+# `pf-cli` was the original workspace name but it's already squatted
+# on crates.io by an unrelated project (`rukai/pf_sandbox`).
+name = "processfork"
+description = "ProcessFork CLI — the `pf` binary. Snapshot, branch, and merge live AI agent state."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

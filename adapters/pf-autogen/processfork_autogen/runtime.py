@@ -88,7 +88,7 @@ class ProcessForkRuntime:
 
         pf = shutil.which("pf")
         if pf is None:
-            raise RuntimeError("`pf` binary not on PATH; build with `cargo build --release -p pf-cli`")
+            raise RuntimeError("`pf` binary not on PATH; build with `cargo build --release -p processfork`")
         store_path = self._store_path()
         cmd = [pf, "--store", str(store_path), "fork", cid, "-n", str(n)]
         if explore:

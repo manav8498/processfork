@@ -36,7 +36,7 @@ It's `git` — snapshot, branch, merge, push, clone — but for live AI agent st
 
 ```bash
 git clone https://github.com/manav8498/processfork && cd processfork
-cargo build --release -p pf-cli
+cargo build --release -p processfork
 export PATH="$PWD/target/release:$PATH"
 
 mkdir /tmp/sandbox && echo "fn main() {}" > /tmp/sandbox/main.rs
@@ -107,7 +107,7 @@ Live KV-cache replay against a real Llama-3-8B vLLM server is the v1.0.1 deliver
 ```bash
 # From source (works today):
 git clone https://github.com/manav8498/processfork && cd processfork
-cargo build --release -p pf-cli                    # → target/release/pf
+cargo build --release -p processfork                    # → target/release/pf
 
 # From package registries (publishes on next release):
 cargo install processfork                          # Rust CLI
@@ -121,7 +121,7 @@ Per-adapter packages live under `adapters/<name>/`. Full instructions in **[docs
 
 ```
 crates/      Rust workspace (10 crates: pf-core, pf-cache, pf-world, pf-effects,
-             pf-model, pf-merge, pf-registry, pf-cli, pf-py, pf-ts)
+             pf-model, pf-merge, pf-registry, processfork (CLI, the `pf` binary), pf-py, pf-ts)
 adapters/    7 first-party integration packages
 benchmarks/  PFBench harness + Criterion microbench
 docs/        mdBook source (25+ pages)

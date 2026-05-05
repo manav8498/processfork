@@ -5,7 +5,7 @@
 # with a clear message.
 #
 # Usage:    bash examples/02-cli-snapshot/run.sh
-# Requires: pf binary built (cargo build --release -p pf-cli).
+# Requires: pf binary built (cargo build --release -p processfork).
 
 set -euo pipefail
 
@@ -13,7 +13,7 @@ cd "$(git rev-parse --show-toplevel)"
 PF=${PF:-./target/release/pf}
 if [[ ! -x "$PF" ]]; then
     echo "building pf..."
-    cargo build --release -p pf-cli
+    cargo build --release -p processfork
 fi
 
 STORE=$(mktemp -d)
