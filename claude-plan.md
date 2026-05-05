@@ -8,8 +8,8 @@
 
 ## Where I am right now
 
-**8 of 12 phases complete and tagged. 132 tests pass (122 Rust + 5 Python +
-5 TypeScript). Lints clean. Workspace is at HEAD = `phase-7-complete`.**
+**9 of 12 phases complete and tagged. 143 tests pass (133 Rust + 5 Python +
+5 TypeScript). Lints clean. Workspace is at HEAD = `phase-8-complete`.**
 
 | Phase | Name              | Status | Tag                | Tests   |
 |-------|-------------------|--------|--------------------|---------|
@@ -21,75 +21,81 @@
 | 5     | model_layer       | ✅ done | phase-5-complete  | 24      |
 | 6     | merge_engine      | ✅ done | phase-6-complete  | 31      |
 | 7     | sdks              | ✅ done | phase-7-complete  | 5+5     |
-| 8     | cli               | ▶ next | —                  | —       |
-| 9–12  | …                 | ⏳ pend | —                  | —       |
+| 8     | cli               | ✅ done | phase-8-complete  | 11      |
+| 9     | registry          | ▶ next | —                  | —       |
+| 10–12 | …                 | ⏳ pend | —                  | —       |
 
-Phase 7 deliverables (this session):
-- **Python SDK**: built via maturin into a real wheel, installed in a
-  fresh uv venv (Py 3.12), 5/5 smoke tests pass.
-- **TypeScript SDK**: built via napi-rs into `processfork.darwin-arm64.node`,
-  5/5 `node --test` smoke tests pass.
+`pf` CLI is now wired end-to-end:
+- 10 wired subcommands (snapshot/fork/checkout/merge/log/diff/status/gc/verify/completions)
+- 3 stub subcommands (push/pull/clone) returning exit 2 with a Phase-9 pointer
+- Exit codes 0/1/2/3/4 per `agent_docs/cli-spec.md` verified by integ tests
+- `examples/02-cli-snapshot/run.sh` runs end-to-end against the binary
 
-## What's next (top of stack — Phase 8: CLI)
+## What's next (top of stack — Phase 9: registry)
 
-Phase 8 is the **`pf` CLI** — wire all 12 subcommands from
-`agent_docs/cli-spec.md` to the layer crates.
+Phase 9 is **registry adapters**. Spec lives in
+`agent_docs/registry-spec.md`. Four backends behind one trait:
 
-Current state: `crates/pf-cli/src/main.rs` already has clap derive
-parsing for all 12 subcommands and renders `--help` correctly; each
-subcommand currently exits 2 with a "scaffold only" message.
+```rust
+#[async_trait]
+pub trait Registry: Send + Sync {
+    async fn push(&self, manifest: &Manifest, blobs: &dyn BlobStore) -> Result<()>;
+    async fn pull(&self, image_ref: &ImageRef) -> Result<(Manifest, Vec<(Digest256, Vec<u8>)>)>;
+    async fn exists(&self, image_ref: &ImageRef) -> Result<bool>;
+}
+```
 
-What needs wiring per `agent_docs/cli-spec.md`:
+1. **`pf-registry::ImageRef`**: parser for `hf://user/repo[:tag]`,
+   `s3://bucket/prefix`, `ipfs://CID`, `oci://host:port/repo[:tag]`,
+   `file://path` (the local-OCI testbed).
+2. **`pf-registry::FileRegistry`**: dead-simple file-system-backed
+   registry — copies `manifest.json` + every reachable blob into a
+   target directory. The build-host integration test backbone; runs
+   without external services.
+3. **`pf-registry::HfRegistry`**: stores manifest + blobs against the
+   Hugging Face Hub via `reqwest`. Auth via `HF_TOKEN`. **Live test
+   gated by `$HF_TOKEN`**.
+4. **`pf-registry::S3Registry`**: S3 / R2 / MinIO. **Live test gated
+   by `$AWS_ACCESS_KEY_ID`**.
+5. **`pf-registry::IpfsRegistry`** (feature-flag `ipfs`): pin manifest
+   + blobs against a local IPFS daemon (`http://127.0.0.1:5001`).
+6. **`pf-registry::sign`**: cosign-style signing of the canonical-JSON
+   manifest bytes. v1 ships keyless (Sigstore Fulcio) by default;
+   key-file via `--key`. For Phase 9 we ship the wire format + verify
+   path; the full Fulcio dance is feature-gated.
+7. **CLI wiring**: replace the `commands/stub.rs` `push`/`pull`/`clone`
+   bodies with real calls into `pf-registry`.
 
-1. `pf snapshot <agent-id>` — for v1 we ship the simple flow used by
-   the Python/TS SDKs: walk a `--fs-root`, capture env, attach an
-   optional `--trace-from-jsonl` file. (Real adapter integration —
-   "snapshot the running Claude Code session" — is Phase 10.)
-2. `pf fork <CID> -n <count>` — copy the manifest with new fingerprints;
-   for v1 the spawn-N-live-branches surface is via the SDK adapters.
-3. `pf checkout <CID> --into <PATH>` — call `pf_world::restore_tree`.
-4. `pf merge <FROM> --into <INTO>` — call `pf_merge::merge` with
-   `StubSummarizer`.
-5. `pf push <CID> <TARGET>` — Phase-9 work; for Phase 8 wire to a
-   `Result::Err(Unimplemented)` with a clear message and exit code 2.
-6. `pf pull <SOURCE>` — same.
-7. `pf clone <SOURCE>` — same.
-8. `pf log [--graph] [--max N]` — walk `store.iter_manifests()`.
-9. `pf diff <A> <B>` — load both manifests and pretty-print the
-   per-layer digests + a one-line summary per layer.
-10. `pf status` — store size, manifest count, default location.
-11. `pf gc [--retain-recent N] [--dry-run]` — basic mark-and-sweep:
-    walk manifests, compute reachable set, delete orphan blobs.
-12. `pf verify [--deep]` — re-hash every blob; fail on mismatch.
-
-Plus shell completions via `clap_complete`: `pf completions bash|zsh|fish`.
-
-Integration test: `crates/pf-cli/tests/cli_smoke.rs` invokes the binary
-via `assert_cmd` (or `std::process::Command`) for the major subcommands.
-End-to-end example: `examples/02-cli-snapshot/` showing
-snapshot → checkout via the CLI.
+For Phase 9 I'll ship the trait + `FileRegistry` fully end-to-end
+(testable on the build host without any external services). HF + S3 +
+IPFS get scaffolded with the trait surface + URL parsing + auth-token-
+aware integration tests gated behind their respective env vars.
 
 ## Blockers
 
-- **None for Phase 8.** Push/pull are deferred to Phase 9 (registry).
+- **None for Phase 9** as scoped above. Live HF / S3 / IPFS round-trips
+  need operator creds and live in CI gated jobs.
 
 ## Recently completed (this session)
 
-- Phase 6 (merge engine): six modules — ancestor + trace + world +
-  effects + model + engine. 28 unit + 3 integration tests.
-- Aligned the Phase-1 fixtures with Phase-2/3/5 wire formats so the
-  synthetic fork-pair flows through the engine.
-- Phase 7 (Python + TypeScript SDKs): both built end-to-end against
-  real maturin/napi binaries; 10 smoke tests pass.
+- Phase 8 (CLI): refactored main.rs into commands/ tree; wired 10
+  subcommands to layer crates; stubbed 3 to Phase 9 with exit 2; added
+  global `--store`/`--no-color`/`-v...`; 11 assert_cmd integration
+  tests; `examples/02-cli-snapshot/run.sh` runnable demo.
 
 ## Files most likely to need editing in the next session
 
-- `crates/pf-cli/src/main.rs` — flesh out subcommand handlers.
-- `crates/pf-cli/src/commands/{snapshot,checkout,merge,log,diff,status,gc,verify}.rs`
-  (new) — one file per command for testability.
-- `crates/pf-cli/tests/cli_smoke.rs` (new).
-- `examples/02-cli-snapshot/` (new).
-- `claude-progress.json` — flip phase 8 to done when gate passes.
+- `crates/pf-registry/Cargo.toml` — drop the unused `reqwest` for the
+  trait + `FileRegistry`; add `async-trait`. Add features
+  `ipfs`, `s3`, `hf` for the gated backends.
+- `crates/pf-registry/src/lib.rs` — re-architect from Phase-0 stub.
+- `crates/pf-registry/src/{image_ref,registry,file,hf,s3,ipfs,sign}.rs`
+  (new).
+- `crates/pf-registry/tests/registry_round_trip.rs` (new) —
+  FileRegistry round-trip is the build-host test; HF / S3 are gated.
+- `crates/pf-cli/src/commands/{push,pull,clone}.rs` (new) — replace
+  the stub bodies with thin wrappers around `pf-registry`.
+- `claude-progress.json` — flip phase 9 to done when gate passes.
 
 ## Operator-only deliverables (cannot run from build agent)
 
@@ -107,6 +113,8 @@ These remain blocked on operator action, not on code:
   `mergekit` install; gated behind `$PF_HAS_GPU=1`).
 - Live summarizer call for trace-merge (needs Anthropic API key; gated
   behind the `live-summarizer` feature flag).
+- Live HF Hub push/pull (needs `HF_TOKEN`; gated test).
+- Live S3 push/pull (needs AWS creds; gated test).
 
 ## Context-window discipline reminders
 

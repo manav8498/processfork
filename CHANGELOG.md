@@ -6,6 +6,49 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added — Phase 8 (CLI)
+
+- `pf` CLI is now wired end-to-end: every subcommand from
+  `agent_docs/cli-spec.md` calls into the layer crates instead of the
+  Phase-0 "scaffold only" stub. Exit codes follow the spec table:
+  `0` ok / `1` bad input / `2` not-yet-implemented / `3` merge conflict /
+  `4` integrity failure.
+- Refactored `crates/pf-cli/src/main.rs` from a single-file scaffold
+  into a `commands/` module tree — one file per subcommand for
+  testability.
+- **Wired subcommands**:
+  - `pf snapshot --agent-id <kind> --fs-root <path> [--name N] [--trace-from-jsonl PATH]`
+    captures the world layer (via `pf_world::WalkFsCapture`), env (via
+    `std::env::vars`), an optional JSONL trace, and stub model + cache +
+    effects layers (matching the SDK's snapshot shape). Prints CID.
+  - `pf fork <CID> -n <N> [--explore HINT] [--name PREFIX]` clones the
+    manifest with new fingerprints and `parents = [<source>]`. CoW
+    inherits all layer blobs.
+  - `pf checkout <CID> --into <PATH>` calls `pf_world::restore_tree`.
+  - `pf merge <FROM> --into <INTO> [--alpha 0.5] [--dare-p 0.7] [--seed N]`
+    runs the Phase-6 engine with `StubSummarizer`. Exits 3 on
+    `MergeOutcome::Conflicted` per the spec.
+  - `pf log [--graph] [--max N]` walks `iter_manifests`, sorted newest
+    first.
+  - `pf diff <A> <B>` per-layer digest diff with `-`/`+` lines.
+  - `pf status` shows store path, manifest count, blob bytes (+ MiB).
+  - `pf gc [--retain-recent N] [--dry-run]` mark-and-sweep over
+    orphaned blobs.
+  - `pf verify [--deep]` re-hashes every blob via `BlobStore::get`
+    (which already validates on read).
+  - `pf completions <shell>` emits a `clap_complete`-generated
+    script (bash / zsh / fish / powershell / elvish).
+- **Stub subcommands** (Phase-9 deferred): `push`, `pull`, `clone`
+  exit 2 with a clear pointer to `claude-progress.json` phase 9.
+- Global flags: `--store <path>` (env `PF_STORE`, default
+  `~/.processfork`), `--no-color`, `-v[vvv]`.
+- 11 integration tests (`crates/pf-cli/tests/cli_smoke.rs`) using
+  `assert_cmd` against the real `pf` binary, covering every wired
+  subcommand + the stub exit codes + the bad-CID error path.
+- `examples/02-cli-snapshot/run.sh` — runnable end-to-end demo
+  exercising snapshot → status → log → snapshot → diff → checkout →
+  verify → push (deferred). Exit 0 with full transcript.
+
 ### Added — Phase 7 (SDKs)
 
 - **Python SDK (`crates/pf-py/`)** — pyo3 0.22 bindings:
