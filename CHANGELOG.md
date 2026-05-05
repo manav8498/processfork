@@ -6,6 +6,32 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added — Phase 2 (world layer)
+
+- `pf-world::WalkFsCapture`: portable rayon-parallel filesystem capture
+  with deterministic per-tree digest, default ignore-list (`.git/objects`,
+  `target`, `node_modules`), opt-in `use_apfs_clone` fast-path that
+  `cp -c -R`-clones a directory in O(1) on macOS before walking, opt-in
+  `follow_symlinks`, custom ignore fragments via builder API.
+- `pf-world::restore_tree`: atomic rebuild of a captured tree —
+  stages into a sibling temp dir, then `rename(2)` over `dst`. Refuses to
+  overwrite an existing path.
+- `pf-world::FsTree` / `FsTreeEntry` (`fs.tree.v1` wire format).
+  Files / dirs / symlinks all round-trip; symlinks captured as symlinks
+  (their targets recorded), not as the targets they happen to point at.
+- `pf-world::EnvCapture`: serializes `std::env::vars()` + cwd into a
+  sorted `BTreeMap` so the digest is deterministic across hosts.
+  `.scrub("(?i)secret|token")`-style regex redaction; matching keys
+  become `"<redacted>"` pre-seal.
+- `pf-world::ProcsCapture`: tagged `procs.criu.v1` blob on Linux when
+  the `criu` binary is in PATH (full dump+tar deferred to live-Linux
+  CI gated by `$PF_HAS_CRIU=1`); `procs.unsupported.v1` placeholder
+  with `unsupported_on: <os>` on every other host so restore can warn
+  cleanly.
+- 9 unit tests + 3 integration tests (`tests/world_round_trip.rs`):
+  byte-identical FS round-trip on a 32 MiB / 256-file sandbox (or 1 GB
+  if `PF_WORLD_TEST_GB=1`), env determinism, procs blob always emitted.
+
 ### Added — Phase 1 (core engine, Rust)
 
 - `pf-core::cas::FsBlobStore`: on-disk content-addressed store, sharded by

@@ -12,11 +12,23 @@ authors.workspace = true
 workspace = true
 
 [dependencies]
-pf-core   = { workspace = true }
-serde     = { workspace = true }
-thiserror = { workspace = true }
-tracing   = { workspace = true }
-tokio     = { workspace = true }
+pf-core    = { workspace = true }
+serde      = { workspace = true }
+serde_json = { workspace = true }
+thiserror  = { workspace = true }
+tracing    = { workspace = true }
+tokio      = { workspace = true }
+chrono     = { workspace = true }
+rayon      = "1.10"
+walkdir    = "2.5"
+regex      = "1.11"
 
 [target.'cfg(unix)'.dependencies]
 nix = { workspace = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+# CRIU shellout discovery in pf-world::procs.
+which = "6.0"
+
+[dev-dependencies]
+tempfile  = { workspace = true }
