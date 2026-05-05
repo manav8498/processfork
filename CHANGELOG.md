@@ -6,6 +6,49 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added — Phase 11 (benchmarks + tests + docs)
+
+**Microbench**
+- `benchmarks/microbench/` — Criterion crate added to the workspace
+  with two benches:
+  - `snapshot_synthetic_4layer`: 4-layer atomic snapshot orchestrator
+    against the default fixture. **Observed: 7.9 ms median** (budget
+    500 ms; 63× headroom).
+  - `cache_capture_64_pages` + `cache_restore_64_pages`: paged-KV
+    serialise/deserialise hot path. **531 µs / 34 µs**.
+- `benchmarks/RESULTS.md` published with reproducible commands +
+  the build-host numbers + the operator-runs-it template for the
+  GPU lane.
+
+**PFBench**
+- `benchmarks/pfbench/harness.py` — operator-runs-it harness with
+  built-in `equals` / `contains` / `regex` graders + a built-in
+  `echo` model so the harness is self-test-able in CI without any
+  API keys. Self-test green: 3 tasks × 2 variants → 100 % pass.
+- `benchmarks/pfbench/aggregate.py` — Markdown table aggregator over
+  one or more results JSONLs.
+
+**Documentation site**
+- `docs/book.toml` + `docs/src/` mdBook source covering:
+  introduction, install, first-fork tutorial, the 60-second demo,
+  architecture overview, all four layer pages, merge protocol,
+  `.pfimg` format, performance budget, security model, CLI
+  reference, Python / TypeScript / Rust SDK refs, all 7 integration
+  adapters, performance tuning, benchmarks index, migration guide,
+  contributing, security policy, release checklist, changelog.
+- README polished with the actual runnable 60-second demo (matching
+  `examples/02-cli-snapshot/run.sh`) at the top.
+
+**Test totals after Phase 11**
+
+- 154 Rust tests (unchanged; microbenches are `cargo bench`, not
+  `cargo test`)
+- 5 Python SDK + 5 TypeScript SDK smoke tests
+- 36 adapter smoke tests + 2 GPU-gated skips
+- = **200 tests across the workspace**, plus
+- 1 PFBench self-test (3 tasks × 2 variants = 6 grading rows)
+- 2 Criterion bench suites (snapshot + cache round-trip)
+
 ### Added — Phase 10 (integration adapters)
 
 All seven first-party adapters from `agent_docs/feature-spec.md` M5 ship
