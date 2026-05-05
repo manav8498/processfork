@@ -1174,10 +1174,14 @@ name = "pf-effects"
 version = "0.1.0-dev"
 dependencies = [
  "chrono",
+ "hex",
  "pf-core",
+ "proptest",
+ "ring",
  "serde",
  "serde_json",
  "sha2",
+ "tempfile",
  "thiserror 1.0.69",
  "tracing",
 ]

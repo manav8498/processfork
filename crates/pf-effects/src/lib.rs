@@ -2,20 +2,17 @@
 //! # `pf-effects`
 //!
 //! Append-only ledger of every irreversible tool call an agent makes, with
-//! idempotency keys and replay-or-fork policy enforcement per ACRFence
-//! semantics. Phase 0 scaffold only.
+//! per-call idempotency keys and an HMAC chain that defends against
+//! semantic-rollback attacks (ACRFence, arXiv 2603.20625). See
+//! `agent_docs/effects-layer.md` for the spec.
 
-#![forbid(unsafe_code)]
+#![deny(unsafe_code)]
+#![allow(missing_docs)]
 
-/// How "dangerous" a tool call's side-effect is, for replay policy purposes.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum SideEffectClass {
-    /// Pure function — safe to replay from cached result.
-    Pure,
-    /// Idempotent under the same idempotency key (POST-with-key, PUT, …).
-    Idempotent,
-    /// Genuinely irreversible (sent email, charged card, dropped table).
-    Irreversible,
-    /// Network-only read (e.g., GET) — cacheable but stale-aware.
-    NetworkOnly,
-}
+pub mod ledger;
+pub mod policy;
+pub mod proxy;
+
+pub use ledger::{Ledger, LedgerEntry, SessionSecret, SideEffectClass};
+pub use policy::{ReplayDecision, ReplayPolicy};
+pub use proxy::{ToolHandler, ToolProxy};

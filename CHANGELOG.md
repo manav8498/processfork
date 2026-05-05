@@ -6,6 +6,34 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added — Phase 3 (effects layer)
+
+- `pf-effects::SideEffectClass`: `Pure | Idempotent | Irreversible | NetworkOnly`,
+  declared by tool authors at registration time.
+- `pf-effects::SessionSecret`: opaque HMAC-key wrapper with redacted `Debug`
+  impl (never logs the secret); `::generate()` uses `ring::rand::SystemRandom`.
+- `pf-effects::LedgerEntry` (`effects.entry.v1`): timestamp, tool_id,
+  args_hash, idempotency_key, result_hash, side_effect_class, session_hmac.
+  HMAC defined as `HMAC-SHA256(secret, prev_entry_hash || this_entry_minus_hmac)`.
+- `pf-effects::Ledger`: append-only ledger with HMAC chaining, `verify()`
+  scan, `serialize` / `deserialize` round-trip via `BlobStore`.
+  Tampering with any entry breaks the chain at that index — defends against
+  ACRFence semantic-rollback (arXiv 2603.20625).
+- `pf-effects::ReplayPolicy`: per-class replay decisions (`InjectCachedResult`,
+  `ReplayWithSameKey`, `ReplayWithNewKey`, `SurfaceAsFact`). Three presets:
+  `default`, `strict`, `aggressive`. Default never re-issues `Irreversible`.
+- `pf-effects::ToolProxy`: wraps a runtime's tool dispatch so every call
+  hashes args, mints an idempotency key (ULID-shaped), runs the tool,
+  hashes the result, and appends to the ledger atomically.
+- `pf-effects::mint_idempotency_key()`: SHA-256(timestamp_ms ‖ 80 random bits).
+  Tested for uniqueness over 256 consecutive calls.
+- 14 unit tests + 4 conformance proptests (`tests/fuzz_replay.rs`) running
+  1000 cases each, covering the four `agent_docs/effects-layer.md` invariants:
+    1. Default policy never re-issues `Irreversible`.
+    2. Idempotency keys are unique within a session.
+    3. HMAC chain validates on untouched ledgers.
+    4. Forking preserves no-duplicate-irreversible across siblings.
+
 ### Added — Phase 2 (world layer)
 
 - `pf-world::WalkFsCapture`: portable rayon-parallel filesystem capture

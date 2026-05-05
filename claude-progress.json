@@ -1,13 +1,13 @@
 {
   "version": 1,
   "started_at": "2026-05-05T14:11:00Z",
-  "current_phase": 3,
+  "current_phase": 4,
   "phases": {
     "0":  { "name": "bootstrap",                "status": "done",        "started_at": "2026-05-05T14:11:00Z", "ended_at": "2026-05-05T14:30:00Z", "tag": "phase-0-complete", "blockers": [] },
     "1":  { "name": "core_engine_rust",         "status": "done",        "started_at": "2026-05-05T14:30:00Z", "ended_at": "2026-05-05T14:55:00Z", "tag": "phase-1-complete", "blockers": [], "results": { "snapshot_p99_ms": 8, "snapshot_budget_ms": 500, "dedup_growth_bytes": 614, "twelve_fork_ratio": "well under 1.5x" } },
     "2":  { "name": "world_layer",              "status": "done",        "started_at": "2026-05-05T14:55:00Z", "ended_at": "2026-05-05T15:15:00Z", "tag": "phase-2-complete", "blockers": [], "results": { "fs_round_trip": "byte-identical on 32 MiB / 256 files (PF_WORLD_TEST_GB=1 to bump to 1 GB)", "env_capture": "deterministic + scrub regex working", "procs_capture": "Linux CRIU stub + macOS Unsupported placeholder", "tests": "9 unit + 3 integration in pf-world; 28 across workspace" } },
-    "3":  { "name": "effects_layer",            "status": "in_progress", "started_at": "2026-05-05T15:15:00Z", "blockers": [] },
-    "4":  { "name": "cache_layer",              "status": "pending" },
+    "3":  { "name": "effects_layer",            "status": "done",        "started_at": "2026-05-05T15:15:00Z", "ended_at": "2026-05-05T15:35:00Z", "tag": "phase-3-complete", "blockers": [], "results": { "ledger_with_hmac_chain": "implemented + tampering test", "tool_proxy_intercepts_calls": true, "conformance_fuzzer_cases": "1000 × 4 invariants", "tests": "14 unit + 4 fuzzer in pf-effects; 46 across workspace" } },
+    "4":  { "name": "cache_layer",              "status": "in_progress", "started_at": "2026-05-05T15:35:00Z", "blockers": [] },
     "5":  { "name": "model_layer",              "status": "pending" },
     "6":  { "name": "merge_engine",             "status": "pending" },
     "7":  { "name": "sdks",                     "status": "pending" },
