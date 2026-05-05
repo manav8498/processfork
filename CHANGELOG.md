@@ -6,6 +6,41 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added — Phase 4 (cache layer)
+
+- `pf-cache::format`: `paged-batchinvariant-v1` wire format —
+  `PageManifest`, `Page { ix, k, v }` (K and V content-addressed
+  independently so a fork mutating only V shares its K page),
+  `LogicalSeq { id, page_ixs, fill_in_last_page }`, `CacheMeta`
+  (page_size_tokens, n_layers, n_heads, head_dim, dtype), `Dtype`
+  (Bf16 / F16 / F32 / Fp8E4m3). `canonicalize()` sorts pages by ix and
+  seqs by id so the manifest digest is invariant across iteration order.
+- `pf-cache::pager::CachePager`: engine-agnostic interface every
+  adapter implements — `pause`, `resume`, `occupied_pages`,
+  `logical_seqs`, `read_page`, `allocate_pages`, `write_page`,
+  `install_logical_seqs`.
+- `pf-cache::pager::SyntheticCachePager`: in-process implementation
+  used by every test; SplitMix64-deterministic page filler so identical
+  seeds produce byte-identical pages (drives CAS dedup), different seeds
+  diverge.
+- `pf-cache::serialize::serialize_pages` / `deserialize_pages`:
+  portable round-trip via the `BlobStore` trait — no GPU needed.
+- `pf-cache::capture::capture_cache` / `restore_cache`: high-level
+  one-shot helpers with pause/resume safety guard. Restore validates
+  meta equality before touching the destination pager.
+- Feature flags `vllm-adapter` and `sglang-adapter` (off by default)
+  for the engine FFI shims that land in Phase 10.
+- 16 unit tests + 4 integration tests
+  (`tests/cache_round_trip.rs`):
+  - byte-identical FS-blob-store round-trip
+  - 12-fork CoW storage budget (≤ 1.5× one-fork) — Cache-layer
+    proof of the §4.6 spec
+  - logical-seq round-trip (id-canonicalized order)
+  - 100-case proptest sweep over random page sets
+- 1 GPU-gated skeleton test (`tests/cache_bit_exact_vllm.rs`) that
+  `eprintln!`-skips off-GPU and is wired for the operator to enable
+  with `PF_HAS_GPU=1` once `adapters/pf-vllm` lands in Phase 10.
+
 ### Added — Phase 3 (effects layer)
 
 - `pf-effects::SideEffectClass`: `Pure | Idempotent | Irreversible | NetworkOnly`,

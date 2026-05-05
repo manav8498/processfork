@@ -11,8 +11,24 @@ authors.workspace = true
 [lints]
 workspace = true
 
+[features]
+# Off by default; turning on pulls in the vLLM Python adapter shim.
+# Real wiring lives in adapters/pf-vllm; this feature toggles the FFI shim
+# inside pf-cache.
+default = []
+vllm-adapter = []
+sglang-adapter = []
+
 [dependencies]
-pf-core   = { workspace = true }
-serde     = { workspace = true }
-thiserror = { workspace = true }
-tracing   = { workspace = true }
+pf-core    = { workspace = true }
+serde      = { workspace = true }
+serde_json = { workspace = true }
+thiserror  = { workspace = true }
+tracing    = { workspace = true }
+bytes      = { workspace = true }
+parking_lot = { workspace = true }
+sha2       = { workspace = true }
+
+[dev-dependencies]
+proptest   = { workspace = true }
+tempfile   = { workspace = true }
