@@ -6,6 +6,63 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added — Phase 6 (merge engine)
+
+- `pf-merge::ancestor::find_lca`: BFS lowest-common-ancestor walk over
+  the manifest parents DAG. Trivial cases (`a == b`, ancestor relations)
+  short-circuit. Multi-parent (octopus) ancestors error explicitly with
+  `AncestorError::OctopusUnsupported` per `agent_docs/merge-protocol.md`.
+- `pf-merge::trace`: pluggable `Summarizer` trait + `StubSummarizer`
+  test impl that deterministically concatenates B's last 4 divergent
+  messages. `merge_trace(blobs, A, B, X, summarizer)` reads three
+  trace blobs, summarizes B's divergence, and emits a new trace =
+  `A.messages + [system: <summary>]`. Returns the new digest, the
+  injected summary, and a char-÷-4 token-count estimate for the
+  cache-layer re-prefill UX line. Live Anthropic API call gated
+  behind the `live-summarizer` feature flag.
+- `pf-merge::world::merge_world`: full three-way file diff on the
+  `pf_world::FsTree` format, implementing the 9-row decision table
+  from `agent_docs/merge-protocol.md` §"World" — including
+  delete-vs-modify resolution, add-on-both-with-same-content as clean,
+  and `<<<<<<< A / ======= / >>>>>>> B`-marker conflict blobs (real
+  text blobs persisted to CAS, referenced from the merged tree).
+  Returns `WorldMergeOutcome { merged_fs, conflicts, clean_paths }`.
+  8 unit tests cover every row of the table.
+- `pf-merge::effects::merge_effects`: emits an `effects.merged.v1`
+  blob that references both parent ledgers (without forging a new
+  HMAC chain over a re-signed merged ledger — that would either
+  require sharing per-session secrets or breaking the chain).
+  Pre-computes counts so `pf merge` UX can print "B's N
+  irreversible calls cached as facts" without re-walking. Honours
+  `replay_with_new_key` (the per-class `--replay-effects` overrides).
+- `pf-merge::model::merge_model`: variant-dispatch wrapper around
+  `pf_model::ties_merge` + `pf_model::dare`. LoRA merges by
+  `(layer_id, matrix)`; Full merges by parameter name; IA³ merges by
+  `(layer, matrix)`; InPlaceTtt is concatenated by step_id. Trivial
+  cases (one or both empty) bypass task arithmetic. Kind mismatches
+  (A is LoRA, B is Full) keep A and flag `kind_mismatch=true`.
+- `pf-merge::engine::merge`: the top-level orchestrator. Auto-
+  discovers the LCA (or accepts an `x_hint`), runs all four layer
+  merges, assembles a new manifest with `parents = [a, b]`, and
+  returns `MergeReport` with per-layer `MergeOutcome`
+  (`Clean | Conflicted | Skipped`) plus the aggregated overall.
+- 28 unit tests (5 ancestor + 4 trace + 8 world + 3 effects + 5
+  model + 3 engine) + 3 integration tests
+  (`tests/merge_round_trip.rs`) exercising the engine end-to-end on
+  the synthetic fork-pair fixture from Phases 1–5.
+
+### Aligned — Phase 1 fixture
+
+- `pf_core::fixture::FixtureWorldCapture` now emits entries matching
+  the canonical `pf_world::FsTreeEntry` schema (`mode`, `kind` fields
+  added) so Phase-1 fixtures flow through Phase-6 merge cleanly.
+- `pf_core::fixture::FixtureEffectsCapture` now prepends the
+  `effects.ledger.v1` header line and includes `session_hmac` per
+  ledger entry to satisfy the Phase-3 wire format.
+- `pf_core::fixture::FixtureModelCapture` now wraps its synthetic
+  random bytes in a `model.diff.v1` envelope (Full delta with one
+  `synth_param` f32 vector) so Phase-5's `load_diff` can read it.
+
 ### Added — Phase 5 (model layer)
 
 - `pf-model::diff::ModelDiff`: tagged enum (`kind: lora|ia3|full|in-place-ttt`)

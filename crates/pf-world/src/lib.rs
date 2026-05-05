@@ -39,5 +39,5 @@ pub mod fs;
 pub mod procs;
 
 pub use env::EnvCapture;
-pub use fs::{FsTree, FsTreeEntry, WalkFsCapture, restore_tree};
+pub use fs::{FsEntryKind, FsTree, FsTreeEntry, WalkFsCapture, restore_tree};
 pub use procs::ProcsCapture;

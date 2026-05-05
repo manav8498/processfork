@@ -11,11 +11,23 @@ authors.workspace = true
 [lints]
 workspace = true
 
+[features]
+default = []
+# Activates the live-summarizer impl (real Anthropic API call).
+# Off by default; tests use the StubSummarizer.
+live-summarizer = []
+
 [dependencies]
 pf-core    = { workspace = true }
 pf-effects = { workspace = true }
 pf-model   = { workspace = true }
 pf-world   = { workspace = true }
 serde      = { workspace = true }
+serde_json = { workspace = true }
 thiserror  = { workspace = true }
 tracing    = { workspace = true }
+chrono     = { workspace = true }
+
+[dev-dependencies]
+proptest   = { workspace = true }
+tempfile   = { workspace = true }

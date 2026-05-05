@@ -1196,11 +1196,15 @@ dependencies = [
 name = "pf-merge"
 version = "0.1.0-dev"
 dependencies = [
+ "chrono",
  "pf-core",
  "pf-effects",
  "pf-model",
  "pf-world",
+ "proptest",
  "serde",
+ "serde_json",
+ "tempfile",
  "thiserror 1.0.69",
  "tracing",
 ]

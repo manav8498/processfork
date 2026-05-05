@@ -82,9 +82,29 @@ impl LayerCapture for FixtureModelCapture {
         let base = store
             .blobs()
             .put(b"base-model-fingerprint:llama-3-8b@sha256:demo")?;
-        let mut diff = vec![0u8; self.0.model_diff_bytes];
-        fill(&mut diff, self.0.seed ^ 0xD1FF);
-        let diff = store.blobs().put(&diff)?;
+
+        // Wrap the synthetic random bytes in a `model.diff.v1` envelope
+        // matching `pf-model::serialize`. We can't depend on pf-model
+        // here (architecture rule: pf-core has no pf-* deps) so we hand-
+        // write the JSON structure.  Stuff the seeded entropy into a
+        // Full delta param's f32 vector — `model_diff_bytes / 4` floats.
+        let n_floats = self.0.model_diff_bytes / 4;
+        let mut bytes = vec![0u8; n_floats * 4];
+        fill(&mut bytes, self.0.seed ^ 0xD1FF);
+        // Reinterpret the random bytes as f32, replacing any non-finite
+        // values with 0.0 so the merge primitives stay finite.
+        let floats: Vec<f32> = bytes
+            .chunks_exact(4)
+            .map(|c| {
+                let v = f32::from_le_bytes([c[0], c[1], c[2], c[3]]);
+                if v.is_finite() { v } else { 0.0 }
+            })
+            .collect();
+        let envelope = serde_json::json!({
+            "layout": "model.diff.v1",
+            "diff": { "kind": "full", "params": { "synth_param": floats } },
+        });
+        let diff = store.blobs().put(&serde_json::to_vec(&envelope)?)?;
         Ok(LayerDescriptor::Model(ModelLayer { base, diff }))
     }
 }
@@ -144,9 +164,13 @@ impl LayerCapture for FixtureWorldCapture {
         for i in 0..self.0.world_files {
             fill(&mut buf, self.0.seed ^ (i as u64) ^ 0xF11E_CAFE);
             let d = store.blobs().put(&buf)?;
+            // Match the canonical pf_world::FsTreeEntry shape so this
+            // fixture can flow through the Phase-6 merge engine.
             entries.push(serde_json::json!({
                 "path": format!("src/file_{i:04}.rs"),
+                "mode": "0644",
                 "size": self.0.world_file_bytes,
+                "kind": "file",
                 "blob": d.as_str(),
             }));
         }
@@ -175,6 +199,14 @@ impl LayerCapture for FixtureEffectsCapture {
     }
     fn capture(&self, store: &PfStore) -> Result<LayerDescriptor> {
         let mut jsonl = Vec::new();
+        // Header line so pf-effects::Ledger::deserialize / pf-merge::merge_effects
+        // recognize this as an effects.ledger.v1 blob.
+        let header = serde_json::json!({
+            "kind": "effects.ledger.v1",
+            "entries": self.0.effects_entries,
+        });
+        jsonl.extend_from_slice(&serde_json::to_vec(&header)?);
+        jsonl.push(b'\n');
         for i in 0..self.0.effects_entries {
             let entry = serde_json::json!({
                 "ts": "2026-05-05T14:11:00Z",
@@ -183,6 +215,7 @@ impl LayerCapture for FixtureEffectsCapture {
                 "idempotency_key": format!("01J{:013}", i),
                 "result_hash": format!("sha256:{:064x}", (self.0.seed.wrapping_mul(7) ^ (i as u64))),
                 "side_effect_class": if i % 5 == 0 { "irreversible" } else { "pure" },
+                "session_hmac": "",
             });
             jsonl.extend_from_slice(&serde_json::to_vec(&entry)?);
             jsonl.push(b'\n');

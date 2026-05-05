@@ -1,8 +1,8 @@
 {
   "version": 1,
   "started_at": "2026-05-05T14:11:00Z",
-  "current_phase": 6,
-  "current_phase_status": "pending — see claude-plan.md for Phase 6 (merge engine) pickup",
+  "current_phase": 7,
+  "current_phase_status": "pending — see claude-plan.md for Phase 7 (SDKs) pickup",
   "phases": {
     "0":  { "name": "bootstrap",                "status": "done",        "started_at": "2026-05-05T14:11:00Z", "ended_at": "2026-05-05T14:30:00Z", "tag": "phase-0-complete", "blockers": [] },
     "1":  { "name": "core_engine_rust",         "status": "done",        "started_at": "2026-05-05T14:30:00Z", "ended_at": "2026-05-05T14:55:00Z", "tag": "phase-1-complete", "blockers": [], "results": { "snapshot_p99_ms": 8, "snapshot_budget_ms": 500, "dedup_growth_bytes": 614, "twelve_fork_ratio": "well under 1.5x" } },
@@ -10,8 +10,8 @@
     "3":  { "name": "effects_layer",            "status": "done",        "started_at": "2026-05-05T15:15:00Z", "ended_at": "2026-05-05T15:35:00Z", "tag": "phase-3-complete", "blockers": [], "results": { "ledger_with_hmac_chain": "implemented + tampering test", "tool_proxy_intercepts_calls": true, "conformance_fuzzer_cases": "1000 × 4 invariants", "tests": "14 unit + 4 fuzzer in pf-effects; 46 across workspace" } },
     "4":  { "name": "cache_layer",              "status": "done",        "started_at": "2026-05-05T16:30:00Z", "ended_at": "2026-05-05T16:50:00Z", "tag": "phase-4-complete", "blockers": [], "results": { "format": "paged-batchinvariant-v1 with K/V independently CAS'd", "round_trip": "byte-identical via FS blob store + 100-case proptest", "cow_dedup": "12-fork ≤ 1.5x one-fork (cache-only)", "vllm_bit_exact_test": "skeleton present; gated by $PF_HAS_GPU=1 + adapters/pf-vllm in Phase 10", "tests": "16 unit + 4 integ + 1 gated; 67 across workspace" } },
     "5":  { "name": "model_layer",              "status": "done",        "started_at": "2026-05-05T17:00:00Z", "ended_at": "2026-05-05T17:25:00Z", "tag": "phase-5-complete", "blockers": [], "results": { "diff_variants": "Lora + IA3 + Full + InPlaceTtt all round-trip", "merge_primitives": "dare + ties_merge with synthetic-input tests", "mergekit_equivalence_test": "deferred to GPU host (needs Llama-3-8B base)", "tests": "20 unit + 4 integ in pf-model; 91 across workspace" } },
-    "6":  { "name": "merge_engine",             "status": "pending", "ready_to_start": true, "blockers": [] },
-    "7":  { "name": "sdks",                     "status": "pending" },
+    "6":  { "name": "merge_engine",             "status": "done",        "started_at": "2026-05-05T17:30:00Z", "ended_at": "2026-05-05T17:55:00Z", "tag": "phase-6-complete", "blockers": [], "results": { "primitives": "ancestor + trace + world + effects + model + engine all shipped", "world_decision_table": "9 rows from agent_docs/merge-protocol.md all covered by unit tests", "effects_no_irreversible_replay_default": true, "tests": "28 unit + 3 integ in pf-merge; 122 across workspace" } },
+    "7":  { "name": "sdks",                     "status": "pending", "ready_to_start": true, "blockers": [] },
     "8":  { "name": "cli",                      "status": "pending" },
     "9":  { "name": "registry",                 "status": "pending" },
     "10": { "name": "integrations",             "status": "pending" },
