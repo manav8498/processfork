@@ -4,7 +4,43 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project adheres to [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [1.0.0] — 2026-05-05
+
+The initial public release. Twelve build phases, 200+ tests across
+Rust + Python + TypeScript surfaces, all four layers shipped, all
+seven first-party adapters present (three end-to-end on the build
+host, four scaffolded with explicit v1.0.1 milestones).
+
+### Phase 12 — release
+
+- Workspace + SDK package versions bumped from `0.1.0-dev` /
+  `0.1.0.dev0` to `1.0.0`.
+- `.github/workflows/release.yml`: full multi-platform release
+  pipeline. On a `v*.*.*` tag push:
+  - Cross-builds the `pf` binary for ubuntu-24.04 (x86_64 + arm64)
+    and macos-14 (arm64).
+  - Cosign-signs each binary keylessly via Sigstore.
+  - Publishes a GitHub Release with binaries + signatures + SHA-256s
+    + the latest `CHANGELOG.md` section as the release notes.
+  - Publishes the 8 publishable Rust crates to crates.io in
+    dep-order (`cargo publish`).
+  - Publishes the `processfork` wheel + the 7 adapter pure-Python
+    pkgs to PyPI (`maturin build` + `twine upload`).
+  - Publishes `@processfork/sdk` to npm (`napi build` + `npm
+    publish`).
+  - Builds + pushes the multi-arch Docker image to
+    `ghcr.io/<owner>/processfork:<tag>` + `:latest`.
+- `Dockerfile`: 2-stage build producing a slim Debian-based image
+  with the `pf` binary on PATH; mounts `/data/store` as a volume.
+- `landing/`: single-page Tailwind landing site at `landing/index.html`
+  ready for GitHub Pages from the `/landing` directory; ~8 KB HTML
+  + 80 KB Tailwind JIT.
+- `demo/script.sh`: 60-second viral-demo recording script that
+  runs end-to-end on a laptop today (snapshot → 12-fork → merge →
+  push to file:// → fresh-store clone → restored). Verified against
+  the built binary.
+- `demo/script.cast.md`: operator-runs-it instructions for
+  asciinema recording + agg conversion to GIF/SVG.
 
 ### Added — Phase 11 (benchmarks + tests + docs)
 

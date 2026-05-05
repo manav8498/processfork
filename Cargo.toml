@@ -31,7 +31,7 @@ default-members = [
 ]
 
 [workspace.package]
-version = "0.1.0-dev"
+version = "1.0.0"
 edition = "2024"
 rust-version = "1.85"
 license = "MIT"
@@ -55,13 +55,13 @@ doc_markdown = "allow"
 
 [workspace.dependencies]
 # Internal crates
-pf-core    = { path = "crates/pf-core",    version = "0.1.0-dev" }
-pf-model   = { path = "crates/pf-model",   version = "0.1.0-dev" }
-pf-cache   = { path = "crates/pf-cache",   version = "0.1.0-dev" }
-pf-world   = { path = "crates/pf-world",   version = "0.1.0-dev" }
-pf-effects = { path = "crates/pf-effects", version = "0.1.0-dev" }
-pf-merge   = { path = "crates/pf-merge",   version = "0.1.0-dev" }
-pf-registry= { path = "crates/pf-registry",version = "0.1.0-dev" }
+pf-core    = { path = "crates/pf-core",    version = "1.0.0" }
+pf-model   = { path = "crates/pf-model",   version = "1.0.0" }
+pf-cache   = { path = "crates/pf-cache",   version = "1.0.0" }
+pf-world   = { path = "crates/pf-world",   version = "1.0.0" }
+pf-effects = { path = "crates/pf-effects", version = "1.0.0" }
+pf-merge   = { path = "crates/pf-merge",   version = "1.0.0" }
+pf-registry= { path = "crates/pf-registry",version = "1.0.0" }
 
 # Async runtime
 tokio = { version = "1.41", features = ["full"] }

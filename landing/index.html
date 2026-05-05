@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="description" content="ProcessFork — fork() for AI agents. Snapshot, branch, and merge live agent state across model + KV-cache + filesystem + tool effects." />
+  <title>ProcessFork — fork() for AI agents</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="icon" href="data:image/svg+xml,&lt;svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 32 32%22&gt;&lt;text y=%22.9em%22 font-size=%2228%22&gt;⑂&lt;/text&gt;&lt;/svg&gt;" />
+  <style>
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, monospace; }
+    .terminal {
+      background: #0b1020;
+      color: #d8e0ff;
+      border-radius: 12px;
+      padding: 18px 22px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, monospace;
+      font-size: 13.5px;
+      line-height: 1.55;
+      box-shadow: 0 30px 60px -30px rgba(15, 23, 42, 0.5);
+    }
+    .term-prompt { color: #7fffd4; }
+    .term-comment { color: #8fa1c7; }
+    .term-cid    { color: #ffe066; }
+    .term-ok     { color: #95f985; }
+  </style>
+</head>
+<body class="bg-slate-50 text-slate-900 antialiased">
+  <header class="max-w-6xl mx-auto px-6 py-6 flex items-center justify-between">
+    <div class="flex items-center gap-3">
+      <span class="text-2xl">⑂</span>
+      <span class="font-semibold tracking-tight text-lg">ProcessFork</span>
+    </div>
+    <nav class="hidden md:flex gap-7 text-sm text-slate-700">
+      <a class="hover:text-slate-900" href="#what">What it is</a>
+      <a class="hover:text-slate-900" href="#layers">Layers</a>
+      <a class="hover:text-slate-900" href="#install">Install</a>
+      <a class="hover:text-slate-900" href="https://github.com/processfork/processfork">GitHub</a>
+    </nav>
+  </header>
+
+  <main class="max-w-6xl mx-auto px-6">
+    <section class="pt-12 pb-20 md:pt-20 md:pb-28">
+      <div class="grid md:grid-cols-12 gap-12 items-center">
+        <div class="md:col-span-7">
+          <h1 class="text-4xl md:text-6xl font-semibold tracking-tight leading-tight">
+            <span class="text-slate-900">fork()</span>
+            <span class="text-slate-500">for AI agents.</span>
+          </h1>
+          <p class="mt-6 text-lg text-slate-700 leading-relaxed">
+            Snapshot a live agent — model fast-weights, KV-cache, sandbox
+            filesystem, tool-effect ledger, and reasoning trace — into one
+            content-addressed image. Branch it. Merge it. Push it. Replay
+            it.
+          </p>
+          <div class="mt-8 flex flex-wrap gap-3">
+            <a href="#install" class="px-5 py-2.5 rounded-lg bg-slate-900 text-white text-sm font-medium hover:bg-slate-700">Get started</a>
+            <a href="https://github.com/processfork/processfork" class="px-5 py-2.5 rounded-lg bg-white text-slate-900 text-sm font-medium border border-slate-200 hover:border-slate-300">View on GitHub</a>
+          </div>
+          <p class="mt-4 text-xs text-slate-500">MIT licensed · Rust core · Python &amp; TypeScript SDKs · 200+ tests passing</p>
+        </div>
+        <div class="md:col-span-5">
+          <div class="terminal">
+            <div><span class="term-comment"># 8 ms snapshot of a live agent state</span></div>
+            <div><span class="term-prompt">$</span> pf snapshot --agent-id claude-code --fs-root .</div>
+            <div><span class="term-cid">sha256:1c2497b0dc23…</span></div>
+            <div class="mt-2"><span class="term-comment"># 12-way fan-out, ~10 ms each (CoW)</span></div>
+            <div><span class="term-prompt">$</span> pf fork sha256:1c24… -n 12 --explore "fix bug"</div>
+            <div><span class="term-cid">sha256:3ca3a0ff…</span></div>
+            <div><span class="term-cid">sha256:67711987…</span> <span class="term-comment">(× 12)</span></div>
+            <div class="mt-2"><span class="term-comment"># Merge the winner back</span></div>
+            <div><span class="term-prompt">$</span> pf merge sha256:842640c0… --into sha256:1c24…</div>
+            <div><span class="term-ok">✓ merged</span> <span class="term-cid">sha256:a41afac1…</span></div>
+            <div class="mt-2"><span class="term-comment"># Ship to a teammate</span></div>
+            <div><span class="term-prompt">$</span> pf push sha256:a41afac1… file:///mnt/registry</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="what" class="py-12 border-t border-slate-200">
+      <h2 class="text-3xl font-semibold tracking-tight">What that buys you</h2>
+      <div class="mt-8 grid md:grid-cols-2 gap-6">
+        <Card title="Try N alternatives in parallel"
+              body="Fork into N divergent branches, run them, score them, merge the winner. CoW dedup means N forks ≤ 1.5× one fork in storage."/>
+        <Card title="Time-travel debugging"
+              body="pf log + pf checkout walks you back to any saved point — same KV cache depth, same FS, same DB."/>
+        <Card title="Cross-machine portable agent state"
+              body="Push to file:// / hf:// / s3:// / oci://. A teammate clones on a different laptop, picks up mid-thought. Bit-exact when --exact."/>
+        <Card title="Effect-aware merge that won't double-send your email"
+              body="HMAC-chained ledger + a default policy that NEVER replays Irreversible calls. ACRFence-aware semantic-rollback resistance."/>
+      </div>
+    </section>
+
+    <section id="layers" class="py-12 border-t border-slate-200">
+      <h2 class="text-3xl font-semibold tracking-tight">The four layers</h2>
+      <div class="mt-8 grid md:grid-cols-2 lg:grid-cols-4 gap-6">
+        <Layer name="Model" body="LoRA / IA³ / full-finetune weight diffs, In-Place TTT. TIES + DARE merge."/>
+        <Layer name="Cache" body="Paged KV-cache, content-addressed per page, copy-on-write across forks."/>
+        <Layer name="World" body="Filesystem (overlayfs / APFS clones), env, in-flight subprocs (CRIU)."/>
+        <Layer name="Effects" body="Append-only ledger of tool calls with HMAC chain + replay policy."/>
+      </div>
+    </section>
+
+    <section id="install" class="py-12 border-t border-slate-200">
+      <h2 class="text-3xl font-semibold tracking-tight">Install</h2>
+      <div class="mt-6 terminal">
+        <div><span class="term-prompt">$</span> cargo install processfork           <span class="term-comment"># Rust CLI</span></div>
+        <div><span class="term-prompt">$</span> pip   install processfork           <span class="term-comment"># Python SDK</span></div>
+        <div><span class="term-prompt">$</span> npm   install @processfork/sdk      <span class="term-comment"># TypeScript SDK</span></div>
+      </div>
+      <p class="mt-4 text-sm text-slate-600">
+        Or build from source — see the <a class="underline" href="https://github.com/processfork/processfork/blob/main/docs/src/install.md">install docs</a>.
+      </p>
+    </section>
+  </main>
+
+  <footer class="border-t border-slate-200 py-10 mt-16">
+    <div class="max-w-6xl mx-auto px-6 flex flex-wrap items-center justify-between gap-4 text-sm text-slate-600">
+      <div>MIT licensed · © 2026 ProcessFork Authors</div>
+      <div class="flex gap-6">
+        <a class="hover:text-slate-900" href="https://github.com/processfork/processfork">GitHub</a>
+        <a class="hover:text-slate-900" href="https://github.com/processfork/processfork/blob/main/SECURITY.md">Security</a>
+        <a class="hover:text-slate-900" href="https://github.com/processfork/processfork/blob/main/CHANGELOG.md">Changelog</a>
+      </div>
+    </div>
+  </footer>
+
+  <script>
+    // Tiny hand-rolled "components" so the markup above stays declarative.
+    function Card({ title, body }) {
+      const el = document.createElement('div');
+      el.className = "rounded-xl bg-white border border-slate-200 p-6 hover:border-slate-300 transition";
+      el.innerHTML = `<div class="font-semibold text-slate-900">${title}</div>
+                      <p class="mt-2 text-slate-700 text-sm leading-relaxed">${body}</p>`;
+      return el;
+    }
+    function Layer({ name, body }) {
+      const el = document.createElement('div');
+      el.className = "rounded-xl bg-white border border-slate-200 p-6";
+      el.innerHTML = `<div class="text-xs uppercase tracking-wider text-slate-500">${name}</div>
+                      <p class="mt-2 text-sm text-slate-700 leading-relaxed">${body}</p>`;
+      return el;
+    }
+    document.querySelectorAll('Card, Layer').forEach(node => {
+      const props = {};
+      for (const a of node.attributes) props[a.name] = a.value;
+      const factory = node.tagName.toLowerCase() === 'card' ? Card : Layer;
+      node.replaceWith(factory(props));
+    });
+  </script>
+</body>
+</html>

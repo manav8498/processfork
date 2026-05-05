@@ -4,13 +4,13 @@ build-backend = "hatchling.build"
 
 [project]
 name = "processfork-crewai"
-version = "0.1.0.dev0"
+version = "1.0.0"
 description = "ProcessFork memory adapter for CrewAI ≥0.130 — time-travel debugging across crew runs."
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.9"
 authors = [{ name = "ProcessFork Authors" }]
-dependencies = ["processfork>=0.1.0.dev0"]
+dependencies = ["processfork>=1.0.0"]
 
 [project.optional-dependencies]
 crewai = ["crewai>=0.130"]

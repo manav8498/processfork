@@ -1304,7 +1304,7 @@ checksum = "9b4f627cb1b25917193a259e49bdad08f671f8d9708acfd5fe0a8c1455d87220"
 
 [[package]]
 name = "pf-cache"
-version = "0.1.0-dev"
+version = "1.0.0"
 dependencies = [
  "bytes",
  "parking_lot",
@@ -1320,7 +1320,7 @@ dependencies = [
 
 [[package]]
 name = "pf-cli"
-version = "0.1.0-dev"
+version = "1.0.0"
 dependencies = [
  "anyhow",
  "assert_cmd",
@@ -1346,7 +1346,7 @@ dependencies = [
 
 [[package]]
 name = "pf-core"
-version = "0.1.0-dev"
+version = "1.0.0"
 dependencies = [
  "bincode",
  "bytes",
@@ -1367,7 +1367,7 @@ dependencies = [
 
 [[package]]
 name = "pf-effects"
-version = "0.1.0-dev"
+version = "1.0.0"
 dependencies = [
  "chrono",
  "hex",
@@ -1384,7 +1384,7 @@ dependencies = [
 
 [[package]]
 name = "pf-merge"
-version = "0.1.0-dev"
+version = "1.0.0"
 dependencies = [
  "chrono",
  "pf-core",
@@ -1414,7 +1414,7 @@ dependencies = [
 
 [[package]]
 name = "pf-model"
-version = "0.1.0-dev"
+version = "1.0.0"
 dependencies = [
  "pf-core",
  "proptest",
@@ -1427,7 +1427,7 @@ dependencies = [
 
 [[package]]
 name = "pf-py"
-version = "0.1.0-dev"
+version = "1.0.0"
 dependencies = [
  "chrono",
  "pf-core",
@@ -1441,7 +1441,7 @@ dependencies = [
 
 [[package]]
 name = "pf-registry"
-version = "0.1.0-dev"
+version = "1.0.0"
 dependencies = [
  "async-trait",
  "hex",
@@ -1461,7 +1461,7 @@ dependencies = [
 
 [[package]]
 name = "pf-ts"
-version = "0.1.0-dev"
+version = "1.0.0"
 dependencies = [
  "chrono",
  "napi",
@@ -1478,7 +1478,7 @@ dependencies = [
 
 [[package]]
 name = "pf-world"
-version = "0.1.0-dev"
+version = "1.0.0"
 dependencies = [
  "chrono",
  "nix",

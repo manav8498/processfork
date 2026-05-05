@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "processfork"
-version = "0.1.0.dev0"
+version = "1.0.0"
 description = "fork() for AI agents — snapshot, branch, and merge live agent state."
 readme = "../../README.md"
 license = { text = "MIT" }

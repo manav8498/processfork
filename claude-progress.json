@@ -2,7 +2,7 @@
   "version": 1,
   "started_at": "2026-05-05T14:11:00Z",
   "current_phase": 12,
-  "current_phase_status": "in_progress — Phase 12 (release)",
+  "current_phase_status": "done — v1.0.0 tagged. All 12 phases complete.",
   "phases": {
     "0":  { "name": "bootstrap",                "status": "done",        "started_at": "2026-05-05T14:11:00Z", "ended_at": "2026-05-05T14:30:00Z", "tag": "phase-0-complete", "blockers": [] },
     "1":  { "name": "core_engine_rust",         "status": "done",        "started_at": "2026-05-05T14:30:00Z", "ended_at": "2026-05-05T14:55:00Z", "tag": "phase-1-complete", "blockers": [], "results": { "snapshot_p99_ms": 8, "snapshot_budget_ms": 500, "dedup_growth_bytes": 614, "twelve_fork_ratio": "well under 1.5x" } },
@@ -16,7 +16,7 @@
     "9":  { "name": "registry",                 "status": "done",        "started_at": "2026-05-05T20:00:00Z", "ended_at": "2026-05-05T20:55:00Z", "tag": "phase-9-complete", "blockers": [], "results": { "schemes": "file/hf/s3/ipfs/oci parser; FileRegistry full impl; HF/S3/IPFS scaffolded with UnsupportedScheme until v1.0.1 features", "transitive_walk": "push/pull walks FsTree + PageManifest for sub-blobs", "signature": "hmac-sha256 self-sign + verify; cosign-keyless v1.1", "cli_wired": "push/pull/clone via pf-registry::open dispatch", "tests": "12 unit + 8 integ in pf-registry; 154 across workspace" } },
     "10": { "name": "integrations",             "status": "done",        "started_at": "2026-05-05T21:00:00Z", "ended_at": "2026-05-05T21:30:00Z", "tag": "phase-10-complete", "blockers": [], "results": { "fully_wired": "claude-code, langgraph, openinterpreter (3 pure-Python adapters end-to-end)", "scaffolded_to_v1_0_1": "vllm, sglang (GPU FFI), autogen, crewai", "tests": "36 adapter smoke + 2 GPU-gated skips; 200 across workspace", "examples": "01..08 all present; 5 runnable on build host" } },
     "11": { "name": "benchmarks_tests_docs",    "status": "done",        "started_at": "2026-05-05T21:30:00Z", "ended_at": "2026-05-05T22:00:00Z", "tag": "phase-11-complete", "blockers": [], "results": { "microbench": "snapshot 7.9 ms vs 500 ms budget; cache capture 531 µs / restore 34 µs", "pfbench": "harness + aggregator + selftest green", "docs": "mdBook with 25+ pages", "readme": "polished with runnable 60s demo at top" } },
-    "12": { "name": "release",                  "status": "in_progress", "started_at": "2026-05-05T22:00:00Z", "blockers": [] }
+    "12": { "name": "release",                  "status": "done",        "started_at": "2026-05-05T22:00:00Z", "ended_at": "2026-05-05T22:30:00Z", "tag": "v1.0.0", "blockers": [], "results": { "version_bumped_to": "1.0.0 across Cargo.toml + 8 pyproject.toml + package.json", "release_workflow": ".github/workflows/release.yml: cross-platform binaries + cosign + GitHub Release + crates.io + PyPI + npm + GHCR", "dockerfile": "2-stage build, slim Debian, /data/store volume", "landing": "landing/index.html (Tailwind, no backend) ready for GH Pages", "demo": "demo/script.sh runs end-to-end on a laptop; demo/script.cast.md is the asciinema runbook" } }
   },
   "assumptions": [
     {

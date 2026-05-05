@@ -4,14 +4,14 @@ build-backend = "hatchling.build"
 
 [project]
 name = "processfork-langgraph"
-version = "0.1.0.dev0"
+version = "1.0.0"
 description = "ProcessFork checkpointer for LangGraph — full four-layer snapshots at every node boundary."
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.9"
 authors = [{ name = "ProcessFork Authors" }]
 dependencies = [
-    "processfork>=0.1.0.dev0",
+    "processfork>=1.0.0",
 ]
 
 [project.optional-dependencies]
