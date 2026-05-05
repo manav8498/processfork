@@ -6,7 +6,13 @@
 </p>
 
 <p align="center">
+  <a href="https://crates.io/crates/processfork"><img src="https://img.shields.io/crates/v/processfork?label=crates.io&color=orange" alt="crates.io"></a>
+  <a href="https://pypi.org/project/processfork/"><img src="https://img.shields.io/pypi/v/processfork?label=PyPI&color=blue" alt="PyPI"></a>
+  <a href="https://www.npmjs.com/package/@processfork/sdk"><img src="https://img.shields.io/npm/v/@processfork/sdk?label=npm&color=red" alt="npm"></a>
+  <a href="https://github.com/manav8498/processfork/releases/latest"><img src="https://img.shields.io/github/v/release/manav8498/processfork?label=release" alt="release"></a>
   <a href="https://github.com/manav8498/processfork/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT"></a>
+</p>
+<p align="center">
   <a href="https://github.com/manav8498/processfork/actions"><img src="https://img.shields.io/github/actions/workflow/status/manav8498/processfork/ci.yml?branch=main&label=CI" alt="CI"></a>
   <a href="#status"><img src="https://img.shields.io/badge/tests-200%20passing-brightgreen" alt="200 tests"></a>
   <a href="#status"><img src="https://img.shields.io/badge/snapshot-8%20ms-brightgreen" alt="8 ms snapshot"></a>
@@ -35,21 +41,24 @@ It's `git` — snapshot, branch, merge, push, clone — but for live AI agent st
 ## Quick start (60 seconds)
 
 ```bash
-git clone https://github.com/manav8498/processfork && cd processfork
-cargo build --release -p processfork
-export PATH="$PWD/target/release:$PATH"
+# install the CLI:
+cargo install processfork                      # → `pf` on your $PATH
 
+# snapshot a directory:
 mkdir /tmp/sandbox && echo "fn main() {}" > /tmp/sandbox/main.rs
 pf snapshot --agent-id demo --fs-root /tmp/sandbox
 # → sha256:1c2497b0…   ⏱ 8 ms
 
-# now edit something and snapshot again:
+# edit something, snapshot again, see the diff:
 echo "fn main() { println!(\"hi\") }" > /tmp/sandbox/main.rs
 pf snapshot --agent-id demo --fs-root /tmp/sandbox --name v2
 pf log
+pf diff <first-cid> <second-cid>
 ```
 
-The full demo (snapshot → fork ×12 → merge → push → clone on a fresh store) is **`bash demo/script.sh`**. Runs end-to-end on a laptop. No GPU, no API keys.
+Prefer Python? `pip install processfork`. TypeScript? `npm install @processfork/sdk`.
+
+The **full 60-second demo** (snapshot → fork ×12 → merge → push → clone on a fresh store) is `bash demo/script.sh`. Runs end-to-end on a laptop. No GPU, no API keys.
 
 ## When you'd reach for it
 
@@ -105,17 +114,31 @@ Live KV-cache replay against a real Llama-3-8B vLLM server is the v1.0.1 deliver
 ## Install
 
 ```bash
-# From source (works today):
-git clone https://github.com/manav8498/processfork && cd processfork
-cargo build --release -p processfork                    # → target/release/pf
-
-# From package registries (publishes on next release):
-cargo install processfork                          # Rust CLI
+cargo install processfork                          # Rust CLI (the `pf` binary)
 pip   install processfork                          # Python SDK
 npm   install @processfork/sdk                     # TypeScript SDK
 ```
 
-Per-adapter packages live under `adapters/<name>/`. Full instructions in **[docs/install.md](./docs/src/install.md)**.
+**Per-adapter packages** (one each on PyPI):
+
+```bash
+pip install processfork-claude-code
+pip install processfork-langgraph
+pip install processfork-openinterpreter
+pip install "processfork-vllm[vllm]"               # needs CUDA + vllm ≥ 0.10
+pip install "processfork-sglang[sglang]"           # needs CUDA + sglang ≥ 0.5
+pip install "processfork-autogen[autogen]"
+pip install "processfork-crewai[crewai]"
+```
+
+**Build from source** if you want to hack on it:
+
+```bash
+git clone https://github.com/manav8498/processfork && cd processfork
+cargo build --release -p processfork               # → target/release/pf
+```
+
+Full build-from-source instructions in **[docs/install.md](./docs/src/install.md)**. Pre-built wheels cover **macOS arm64**, **Linux x86_64**, and **Linux aarch64**; macOS Intel + Windows wheels arrive in v1.0.1 (operator: same package, just more platforms).
 
 ## Repo layout
 
