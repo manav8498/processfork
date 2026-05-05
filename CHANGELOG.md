@@ -6,6 +6,48 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added — Phase 9 (registry)
+
+- `pf-registry::ImageRef`: parser for the five supported URL schemes —
+  `file://`, `hf://`, `s3://`, `ipfs://`, `oci://`. Tags split correctly
+  even when they collide with `host:port` syntax (oci) or `user/repo`
+  (hf). 8 unit tests cover the round-trips + bad-scheme + missing-repo
+  errors.
+- `pf-registry::Registry` trait + `pf-registry::LayerSet`. Async via
+  `async-trait`. Push uploads the manifest + every transitively-
+  reachable blob; pull returns both. `RegistryError::UnsupportedScheme`
+  cleanly distinguishes "feature flag off" from real backend failures.
+- `pf-registry::FileRegistry`: filesystem-backed registry. Layout
+  matches `agent_docs/registry-spec.md` — `manifest.json`,
+  `manifest.json.sig`, `blobs/sha256/<aa>/<aabb…>.zst`. Used as the
+  build-host integration test backbone; doubles as an air-gapped
+  transport mechanism (`pf push file:///mnt/usb/...`).
+- `pf-registry::transitive_blob_digests` walks the world FsTree to
+  enumerate file blobs and the cache PageManifest to enumerate K/V page
+  blobs; without this, push only mirrored the 8 top-level layer
+  descriptors and `pf checkout` post-pull failed missing-blob.
+- `pf-registry::sign`: cosign-shaped manifest signing. v1 ships
+  `hmac-sha256` (self-signed with a default key; documented in
+  `SECURITY.md` as forge-able by anyone holding the default key).
+  Sigstore Fulcio (keyless) is feature-gated for v1.1.
+- `pf-registry::HfRegistry`, `S3Registry`, `IpfsRegistry`: trait
+  surface + URL parsing + auth-token plumbing. Live HTTP paths land in
+  v1.0.1 behind their respective `*-live` feature flags.
+  `pf_registry::open(image_ref, auth)` dispatches to the right adapter.
+- **CLI wiring**: `crates/pf-cli/src/commands/stub.rs` (renamed
+  conceptually but kept on disk for v1) now calls into `pf-registry`
+  for `push`, `pull`, and `clone`. UnsupportedScheme errors map to the
+  same exit-code-2 semantics as the Phase-8 stubs. Single-shot tokio
+  runtime spun up per invocation.
+- 8 integration tests in `crates/pf-registry/tests/registry_round_trip.rs`:
+  full round-trip via FileRegistry, tampered-manifest detection,
+  tampered-blob detection, two-push CoW dedup, and three "adapter
+  cleanly returns UnsupportedScheme in default build" tests.
+- 12 unit tests across `image_ref` and `sign`.
+- 2 new CLI integ tests: `push_to_hf_exits_2_unsupported_scheme` (the
+  Phase-8 stub test reworked) and `push_then_pull_via_file_registry_round_trips`
+  (end-to-end CLI round-trip).
+
 ### Added — Phase 8 (CLI)
 
 - `pf` CLI is now wired end-to-end: every subcommand from

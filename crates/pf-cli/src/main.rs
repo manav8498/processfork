@@ -85,9 +85,9 @@ fn main() -> std::process::ExitCode {
         Command::Gc(a) => commands::gc::run(&store_root, a),
         Command::Verify(a) => commands::verify::run(&store_root, a),
         Command::Completions(a) => commands::completions::run(a),
-        Command::Push(a) => commands::stub::push(a),
-        Command::Pull(a) => commands::stub::pull(a),
-        Command::Clone(a) => commands::stub::clone(a),
+        Command::Push(a) => commands::stub::push(&store_root, a),
+        Command::Pull(a) => commands::stub::pull(&store_root, a),
+        Command::Clone(a) => commands::stub::clone(&store_root, a),
     };
 
     match result {

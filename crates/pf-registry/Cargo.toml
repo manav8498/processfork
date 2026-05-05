@@ -1,6 +1,6 @@
 [package]
 name = "pf-registry"
-description = "ProcessFork registry adapters: Hugging Face Hub, S3-compatible, IPFS, local OCI"
+description = "ProcessFork registry adapters: file, Hugging Face Hub, S3-compatible, IPFS, local OCI"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -11,10 +11,30 @@ authors.workspace = true
 [lints]
 workspace = true
 
+[features]
+default = []
+# Activates the live HF / S3 / IPFS adapter HTTP code. Off by default
+# so the build-host test runs against the FileRegistry without pulling
+# heavy network deps.
+hf-live   = ["dep:reqwest"]
+s3-live   = ["dep:reqwest"]
+ipfs-live = ["dep:reqwest"]
+
 [dependencies]
-pf-core   = { workspace = true }
-serde     = { workspace = true }
-thiserror = { workspace = true }
-tracing   = { workspace = true }
-tokio     = { workspace = true }
-reqwest   = { workspace = true }
+pf-core    = { workspace = true }
+serde      = { workspace = true }
+serde_json = { workspace = true }
+thiserror  = { workspace = true }
+tracing    = { workspace = true }
+tokio      = { workspace = true }
+async-trait = "0.1"
+reqwest    = { workspace = true, optional = true }
+zstd       = { workspace = true }
+sha2       = { workspace = true }
+hex        = { workspace = true }
+ring       = { workspace = true }
+
+[dev-dependencies]
+tempfile   = { workspace = true }
+tokio      = { workspace = true }
+walkdir    = "2.5"

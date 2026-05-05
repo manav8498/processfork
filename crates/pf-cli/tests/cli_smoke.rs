@@ -249,17 +249,76 @@ fn gc_dry_run_reports_zero_unreachable_after_a_single_snapshot() {
 }
 
 #[test]
-fn push_exits_2_with_phase_9_message() {
+fn push_to_hf_exits_2_unsupported_scheme() {
+    // Phase 9 wires push to a real registry; hf:// remains UnsupportedScheme
+    // until v1.0.1's `--features hf-live` lands. We snapshot a real CID
+    // first so push gets past manifest-loading and into the
+    // registry-dispatch step where hf:// returns the gated error.
     let store = TempDir::new().unwrap();
+    let sandbox = TempDir::new().unwrap();
+    make_sandbox(sandbox.path());
+    let cid = String::from_utf8(
+        pf(store.path())
+            .args(["snapshot", "--agent-id", "t", "--fs-root"])
+            .arg(sandbox.path())
+            .assert()
+            .success()
+            .get_output()
+            .stdout
+            .clone(),
+    )
+    .unwrap()
+    .trim()
+    .to_owned();
     pf(store.path())
-        .args([
-            "push",
-            "sha256:0000000000000000000000000000000000000000000000000000000000000000",
-            "hf://test/repo",
-        ])
+        .args(["push", &cid, "hf://test/repo"])
         .assert()
         .code(2)
-        .stderr(contains("Phase 9"));
+        .stderr(contains("hf://"));
+}
+
+#[test]
+fn push_then_pull_via_file_registry_round_trips() {
+    // Phase-9 acceptance: end-to-end registry round-trip via the local
+    // FileRegistry backend.
+    let store_a = TempDir::new().unwrap();
+    let store_b = TempDir::new().unwrap();
+    let registry = TempDir::new().unwrap();
+    let sandbox = TempDir::new().unwrap();
+    make_sandbox(sandbox.path());
+
+    let cid = String::from_utf8(
+        pf(store_a.path())
+            .args(["snapshot", "--agent-id", "t", "--fs-root"])
+            .arg(sandbox.path())
+            .assert()
+            .success()
+            .get_output()
+            .stdout
+            .clone(),
+    )
+    .unwrap()
+    .trim()
+    .to_owned();
+
+    let target = format!("file://{}", registry.path().display());
+    pf(store_a.path())
+        .args(["push", &cid, &target])
+        .assert()
+        .success();
+    let pulled = String::from_utf8(
+        pf(store_b.path())
+            .args(["pull", &target])
+            .assert()
+            .success()
+            .get_output()
+            .stdout
+            .clone(),
+    )
+    .unwrap()
+    .trim()
+    .to_owned();
+    assert_eq!(pulled, cid, "round-trip CID identical");
 }
 
 #[test]

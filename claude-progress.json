@@ -1,8 +1,8 @@
 {
   "version": 1,
   "started_at": "2026-05-05T14:11:00Z",
-  "current_phase": 9,
-  "current_phase_status": "pending — see claude-plan.md for Phase 9 (registry) pickup",
+  "current_phase": 10,
+  "current_phase_status": "pending — see claude-plan.md for Phase 10 (integrations) pickup",
   "phases": {
     "0":  { "name": "bootstrap",                "status": "done",        "started_at": "2026-05-05T14:11:00Z", "ended_at": "2026-05-05T14:30:00Z", "tag": "phase-0-complete", "blockers": [] },
     "1":  { "name": "core_engine_rust",         "status": "done",        "started_at": "2026-05-05T14:30:00Z", "ended_at": "2026-05-05T14:55:00Z", "tag": "phase-1-complete", "blockers": [], "results": { "snapshot_p99_ms": 8, "snapshot_budget_ms": 500, "dedup_growth_bytes": 614, "twelve_fork_ratio": "well under 1.5x" } },
@@ -13,8 +13,8 @@
     "6":  { "name": "merge_engine",             "status": "done",        "started_at": "2026-05-05T17:30:00Z", "ended_at": "2026-05-05T17:55:00Z", "tag": "phase-6-complete", "blockers": [], "results": { "primitives": "ancestor + trace + world + effects + model + engine all shipped", "world_decision_table": "9 rows from agent_docs/merge-protocol.md all covered by unit tests", "effects_no_irreversible_replay_default": true, "tests": "28 unit + 3 integ in pf-merge; 122 across workspace" } },
     "7":  { "name": "sdks",                     "status": "done",        "started_at": "2026-05-05T18:00:00Z", "ended_at": "2026-05-05T18:35:00Z", "tag": "phase-7-complete", "blockers": [], "results": { "python_sdk": "5/5 smoke tests pass against real maturin wheel installed in fresh uv venv (Py 3.12)", "typescript_sdk": "5/5 smoke tests pass against real napi binary (processfork.darwin-arm64.node, 1.8 MB)", "type_stubs_present": "_pf_py.pyi + auto-generated index.d.ts", "tests": "10 SDK smoke tests; 132 across all surfaces" } },
     "8":  { "name": "cli",                      "status": "done",        "started_at": "2026-05-05T19:00:00Z", "ended_at": "2026-05-05T19:55:00Z", "tag": "phase-8-complete", "blockers": [], "results": { "wired_subcommands": "snapshot, fork, checkout, merge, log, diff, status, gc, verify, completions", "deferred_to_phase_9": "push, pull, clone (exit 2)", "exit_codes_per_spec": "0/1/2/3/4 verified by integration tests", "tests": "11 cli_smoke tests; 133 across workspace" } },
-    "9":  { "name": "registry",                 "status": "pending", "ready_to_start": true, "blockers": [] },
-    "10": { "name": "integrations",             "status": "pending" },
+    "9":  { "name": "registry",                 "status": "done",        "started_at": "2026-05-05T20:00:00Z", "ended_at": "2026-05-05T20:55:00Z", "tag": "phase-9-complete", "blockers": [], "results": { "schemes": "file/hf/s3/ipfs/oci parser; FileRegistry full impl; HF/S3/IPFS scaffolded with UnsupportedScheme until v1.0.1 features", "transitive_walk": "push/pull walks FsTree + PageManifest for sub-blobs", "signature": "hmac-sha256 self-sign + verify; cosign-keyless v1.1", "cli_wired": "push/pull/clone via pf-registry::open dispatch", "tests": "12 unit + 8 integ in pf-registry; 154 across workspace" } },
+    "10": { "name": "integrations",             "status": "pending", "ready_to_start": true, "blockers": [] },
     "11": { "name": "benchmarks_tests_docs",    "status": "pending" },
     "12": { "name": "release",                  "status": "pending" }
   },

@@ -8,8 +8,8 @@
 
 ## Where I am right now
 
-**9 of 12 phases complete and tagged. 143 tests pass (133 Rust + 5 Python +
-5 TypeScript). Lints clean. Workspace is at HEAD = `phase-8-complete`.**
+**10 of 12 phases complete and tagged. 164 tests pass (154 Rust + 5 Python +
+5 TypeScript). Lints clean. Workspace is at HEAD = `phase-9-complete`.**
 
 | Phase | Name              | Status | Tag                | Tests   |
 |-------|-------------------|--------|--------------------|---------|
@@ -21,81 +21,76 @@
 | 5     | model_layer       | ✅ done | phase-5-complete  | 24      |
 | 6     | merge_engine      | ✅ done | phase-6-complete  | 31      |
 | 7     | sdks              | ✅ done | phase-7-complete  | 5+5     |
-| 8     | cli               | ✅ done | phase-8-complete  | 11      |
-| 9     | registry          | ▶ next | —                  | —       |
-| 10–12 | …                 | ⏳ pend | —                  | —       |
+| 8     | cli               | ✅ done | phase-8-complete  | 12      |
+| 9     | registry          | ✅ done | phase-9-complete  | 20      |
+| 10    | integrations      | ▶ next | —                  | —       |
+| 11–12 | …                 | ⏳ pend | —                  | —       |
 
-`pf` CLI is now wired end-to-end:
-- 10 wired subcommands (snapshot/fork/checkout/merge/log/diff/status/gc/verify/completions)
-- 3 stub subcommands (push/pull/clone) returning exit 2 with a Phase-9 pointer
-- Exit codes 0/1/2/3/4 per `agent_docs/cli-spec.md` verified by integ tests
-- `examples/02-cli-snapshot/run.sh` runs end-to-end against the binary
+End-to-end registry round-trip works on the build host:
+- `pf snapshot` in store A → `pf push file://...` to a registry dir →
+  `pf pull file://...` into store B → CID is identical.
+- `pf clone file://... --into PATH` does pull + restore in one step.
+- Tampered manifests / blobs caught on pull (signature + re-hash).
 
-## What's next (top of stack — Phase 9: registry)
+## What's next (top of stack — Phase 10: integrations)
 
-Phase 9 is **registry adapters**. Spec lives in
-`agent_docs/registry-spec.md`. Four backends behind one trait:
+Phase 10 is the **seven first-party integration adapters** per
+`agent_docs/feature-spec.md` M5. Each adapter wraps an existing
+agent-runtime so it can snapshot / fork / merge through ProcessFork.
 
-```rust
-#[async_trait]
-pub trait Registry: Send + Sync {
-    async fn push(&self, manifest: &Manifest, blobs: &dyn BlobStore) -> Result<()>;
-    async fn pull(&self, image_ref: &ImageRef) -> Result<(Manifest, Vec<(Digest256, Vec<u8>)>)>;
-    async fn exists(&self, image_ref: &ImageRef) -> Result<bool>;
-}
-```
+The full v1 list:
+1. Claude Code wrapper (`pf wrap claude` slash-commands).
+2. LangGraph checkpointer.
+3. OpenInterpreter wrapper.
+4. vLLM native server plugin (paged-KV cache via Phase-4 format).
+5. SGLang native server plugin (RadixAttention via Phase-4 format).
+6. AutoGen runtime adapter.
+7. CrewAI memory adapter.
 
-1. **`pf-registry::ImageRef`**: parser for `hf://user/repo[:tag]`,
-   `s3://bucket/prefix`, `ipfs://CID`, `oci://host:port/repo[:tag]`,
-   `file://path` (the local-OCI testbed).
-2. **`pf-registry::FileRegistry`**: dead-simple file-system-backed
-   registry — copies `manifest.json` + every reachable blob into a
-   target directory. The build-host integration test backbone; runs
-   without external services.
-3. **`pf-registry::HfRegistry`**: stores manifest + blobs against the
-   Hugging Face Hub via `reqwest`. Auth via `HF_TOKEN`. **Live test
-   gated by `$HF_TOKEN`**.
-4. **`pf-registry::S3Registry`**: S3 / R2 / MinIO. **Live test gated
-   by `$AWS_ACCESS_KEY_ID`**.
-5. **`pf-registry::IpfsRegistry`** (feature-flag `ipfs`): pin manifest
-   + blobs against a local IPFS daemon (`http://127.0.0.1:5001`).
-6. **`pf-registry::sign`**: cosign-style signing of the canonical-JSON
-   manifest bytes. v1 ships keyless (Sigstore Fulcio) by default;
-   key-file via `--key`. For Phase 9 we ship the wire format + verify
-   path; the full Fulcio dance is feature-gated.
-7. **CLI wiring**: replace the `commands/stub.rs` `push`/`pull`/`clone`
-   bodies with real calls into `pf-registry`.
+For one session, realistic scope:
+- Lay down the seven crate skeletons under `adapters/`.
+- Ship 2–3 adapters end-to-end; scaffold the rest with API surface +
+  README + GPU-/network-gated test placeholders.
+- Each adapter's spec lives in `agent_docs/integration-<name>.md`.
 
-For Phase 9 I'll ship the trait + `FileRegistry` fully end-to-end
-(testable on the build host without any external services). HF + S3 +
-IPFS get scaffolded with the trait surface + URL parsing + auth-token-
-aware integration tests gated behind their respective env vars.
+**Recommended order**:
+1. **Claude Code** — pure-Python wrapper around the SDK; no model
+   server needed; testable on the build host.
+2. **LangGraph** — Python adapter implementing the
+   `langgraph.checkpoint.BaseCheckpointSaver` interface; heavy dep but
+   testable with a tiny synthetic graph.
+3. **OpenInterpreter** — pure-Python; should follow Claude Code's
+   pattern.
+4. **vLLM**, **SGLang**, **AutoGen**, **CrewAI** — need real model
+   servers / multi-agent runtimes; ship API + integration test
+   skeletons gated by `$PF_HAS_GPU=1` (vLLM/SGLang) or just deps
+   present (AutoGen/CrewAI).
 
 ## Blockers
 
-- **None for Phase 9** as scoped above. Live HF / S3 / IPFS round-trips
-  need operator creds and live in CI gated jobs.
+- **None for the recommended scope** above. Real Llama-3-8B integration
+  for vLLM/SGLang requires a CUDA host and is gated by `$PF_HAS_GPU=1`.
 
 ## Recently completed (this session)
 
 - Phase 8 (CLI): refactored main.rs into commands/ tree; wired 10
-  subcommands to layer crates; stubbed 3 to Phase 9 with exit 2; added
-  global `--store`/`--no-color`/`-v...`; 11 assert_cmd integration
-  tests; `examples/02-cli-snapshot/run.sh` runnable demo.
+  subcommands; stubbed 3 to Phase 9; 11 assert_cmd integ tests;
+  examples/02-cli-snapshot/run.sh.
+- Phase 9 (registry): ImageRef parser for 5 schemes; Registry trait;
+  FileRegistry full impl with sign+verify; HF/S3/IPFS scaffolded;
+  transitive blob walker; CLI push/pull/clone wired end-to-end;
+  20 tests in pf-registry.
 
 ## Files most likely to need editing in the next session
 
-- `crates/pf-registry/Cargo.toml` — drop the unused `reqwest` for the
-  trait + `FileRegistry`; add `async-trait`. Add features
-  `ipfs`, `s3`, `hf` for the gated backends.
-- `crates/pf-registry/src/lib.rs` — re-architect from Phase-0 stub.
-- `crates/pf-registry/src/{image_ref,registry,file,hf,s3,ipfs,sign}.rs`
-  (new).
-- `crates/pf-registry/tests/registry_round_trip.rs` (new) —
-  FileRegistry round-trip is the build-host test; HF / S3 are gated.
-- `crates/pf-cli/src/commands/{push,pull,clone}.rs` (new) — replace
-  the stub bodies with thin wrappers around `pf-registry`.
-- `claude-progress.json` — flip phase 9 to done when gate passes.
+- `adapters/pf-claude-code/` (new) — pure-Python wrapper around the
+  Python SDK + a hook script for Claude Code's PreToolUse / PostToolUse.
+- `adapters/pf-langgraph/` (new) — Python pkg.
+- `adapters/pf-openinterpreter/` (new).
+- `adapters/pf-{vllm,sglang,autogen,crewai}/` — API surface + README.
+- `examples/03-claude-code-fork/`, `examples/04-langgraph-checkpoint/`,
+  etc. (one per shipped adapter).
+- `claude-progress.json` — flip phase 10 to done when gate passes.
 
 ## Operator-only deliverables (cannot run from build agent)
 
@@ -113,8 +108,10 @@ These remain blocked on operator action, not on code:
   `mergekit` install; gated behind `$PF_HAS_GPU=1`).
 - Live summarizer call for trace-merge (needs Anthropic API key; gated
   behind the `live-summarizer` feature flag).
-- Live HF Hub push/pull (needs `HF_TOKEN`; gated test).
-- Live S3 push/pull (needs AWS creds; gated test).
+- Live HF Hub push/pull (needs `HF_TOKEN`; gated `--features hf-live`).
+- Live S3 push/pull (needs AWS creds; gated `--features s3-live`).
+- Live IPFS push/pull (needs local IPFS daemon; gated
+  `--features ipfs-live`).
 
 ## Context-window discipline reminders
 
