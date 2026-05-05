@@ -8,8 +8,8 @@
 
 ## Where I am right now
 
-**5 of 12 phases complete and tagged. 67 tests pass workspace-wide. Lints
-clean. Workspace is at HEAD = `phase-4-complete`.**
+**6 of 12 phases complete and tagged. 91 tests pass workspace-wide. Lints
+clean. Workspace is at HEAD = `phase-5-complete`.**
 
 | Phase | Name              | Status | Tag                | Tests |
 |-------|-------------------|--------|--------------------|-------|
@@ -18,8 +18,9 @@ clean. Workspace is at HEAD = `phase-4-complete`.**
 | 2     | world_layer       | ✅ done | phase-2-complete  | 12    |
 | 3     | effects_layer     | ✅ done | phase-3-complete  | 18    |
 | 4     | cache_layer       | ✅ done | phase-4-complete  | 21    |
-| 5     | model_layer       | ▶ next | —                  | —     |
-| 6–12  | …                 | ⏳ pend | —                  | —     |
+| 5     | model_layer       | ✅ done | phase-5-complete  | 24    |
+| 6     | merge_engine      | ▶ next | —                  | —     |
+| 7–12  | …                 | ⏳ pend | —                  | —     |
 
 Headline numbers (build-host = macOS arm64, no GPU):
 - Snapshot p99      : **8 ms** (budget 500 ms; ~60× headroom)
@@ -28,57 +29,76 @@ Headline numbers (build-host = macOS arm64, no GPU):
 - FS round-trip     : byte-identical on 32 MiB / 256-file sandbox
 - Effect ledger     : tampering caught; 1000-case proptest sweep passes
 - Cache layer       : byte-identical round-trip via FsBlobStore + 100-case proptest
+- Model layer       : 4 diff variants round-trip; TIES + DARE primitives pass
 
-## What's next (top of stack — Phase 5: model layer)
+## What's next (top of stack — Phase 6: merge engine)
 
-Phase 5 is **model layer**. Spec lives in `agent_docs/model-layer.md`.
+Phase 6 is **three-way merge engine**. Spec lives in
+`agent_docs/merge-protocol.md`.
 
-1. `crates/pf-model/src/diff.rs`: `ModelDiff` enum + per-variant types:
-   - `Lora { adapters: Vec<LoRAAdapter> }` where `LoRAAdapter { layer_id,
-     matrix, rank, in_dim, out_dim, a: Vec<f32>, b: Vec<f32> }`.
-   - `IA3 { scaling: BTreeMap<LayerId, Vec<f32>> }`.
-   - `Full { params: BTreeMap<ParamName, Vec<f32>> }`.
-   - `InPlaceTtt { steps: Vec<TttStep> }`.
-2. `crates/pf-model/src/serialize.rs`: round-trip every variant through
-   `BlobStore`. Dedup-friendly: each parameter tensor hashed independently
-   so two LoRA adapters that share a weight matrix share storage.
-3. `crates/pf-model/src/merge.rs`: TIES + DARE task arithmetic.
-   - `dare(delta, p)`: zero out a fraction `p` of magnitudes, rescale
-     survivors by `1/(1-p)`. Default p=0.7 per `agent_docs/architecture.md`.
-   - `ties_merge(deltas, alpha)`: trim, sign-elect (majority vote),
-     disjoint-merge survivors. Default α=0.5.
-   - Tested against synthetic deterministic inputs; the mergekit-equivalence
-     test (against an external `mergekit` reference) is gated by
-     `$PF_HAS_GPU=1` because it needs Llama-3-8B base weights.
-4. Integration test `tests/model_round_trip.rs`: serialize→deserialize→
-   apply→assert byte-identical post-apply state for each ModelDiff variant.
-5. Optional bench: TIES+DARE wall-clock on 8×8 toy matrices (Criterion).
+The four primitives, one per layer:
 
-Trade-off note: real safetensors integration is a heavy dep (`safetensors`
-crate, ~50 kloc transitively). For Phase 5 we ship the algebra + a
-JSON-typed wire format; safetensors interop lands in Phase 10's vLLM
-adapter where it's actually needed.
+1. **Trace** (`crates/pf-merge/src/trace.rs`): given trace blobs A, B, X,
+   produce a "lessons learned" patch via the configured summarizer
+   (default `claude-haiku-4-5` via `PF_SUMMARIZER` env). Phase 6 ships the
+   interface (`trait Summarizer`) plus a `StubSummarizer` test impl that
+   concatenates the divergence diff. Real Claude API call is gated behind
+   the `live-summarizer` feature flag (no API key in build env).
+
+2. **World** (`crates/pf-merge/src/world.rs`): three-way file diff over
+   the `pf_world::FsTree` blob format. For each path in
+   `union(A, B, X)` apply the table from `agent_docs/merge-protocol.md`
+   §"World"; conflicts produce a `<<<<<<<`-style merge marker text blob
+   per file. Output is a new `FsTree` plus a `Vec<ConflictedPath>`.
+
+3. **Effects** (`crates/pf-merge/src/effects.rs`): never replay
+   irreversible. Union of A's and B's ledgers in causal order; B's
+   irreversible entries marked `replayed=false, reason="merged from
+   sibling"`. Honours `--replay-effects=<class>` from the CLI.
+
+4. **Model** (`crates/pf-merge/src/model.rs`): wrap `pf_model::ties_merge`
+   and `pf_model::dare`. For LoRA we elementwise-merge the A and B
+   matrices; for Full we merge each parameter; IA³ similar. If both A and
+   B are non-trivial, surface a soft warning and apply task arithmetic
+   with `α = 0.5`.
+
+Plus the orchestrator:
+
+5. **Common-ancestor discovery** (`crates/pf-merge/src/ancestor.rs`):
+   walk parent chains breadth-first, find LCA. Multi-parent (octopus)
+   merges error in v1.
+
+6. **Top-level engine** (`crates/pf-merge/src/engine.rs`):
+   `merge(a, b, store) -> MergeResult` runs all four layer merges and
+   produces a new manifest. `MergeOutcome::Conflicted` returns enough
+   info for a future `pf merge --tool` UX.
+
+7. Integration test `tests/merge_round_trip.rs`: synthesize three small
+   manifests (X, A, B) with overlapping and conflicting world-layer
+   files, run merge, assert clean-merge / conflict cases match the
+   table.
 
 ## Blockers
 
-- **None for Phase 5.** Mergekit-equivalence test is GPU-gated; the algebra
-  unit tests run on the build host.
+- **None for Phase 6.** Live-summarizer test is feature-gated; conflict
+  resolution UX (`pf merge --tool`) is a Phase-8 CLI deliverable.
 
 ## Recently completed (this session series)
 
 - Phase 0–3 (prior session): workspace, core engine, world, effects.
-- Phase 4 **(this session)**: paged KV-cache wire format, engine-agnostic
-  CachePager trait, SyntheticCachePager (in-memory, deterministic),
-  serialize/deserialize via BlobStore, capture/restore high-level helpers,
-  100-case proptest round-trip, GPU-gated bit-exact-vLLM test skeleton.
+- Phase 4 (this session): paged KV-cache wire format, CachePager trait,
+  SyntheticCachePager, capture/restore via BlobStore, 100-case proptest.
+- Phase 5 (this session): ModelDiff variants (LoRA / IA³ / Full /
+  InPlaceTtt), serialize/load via BlobStore, DARE + TIES primitives,
+  64-case proptest on TIES merge.
 
 ## Files most likely to need editing in the next session
 
-- `crates/pf-model/Cargo.toml` — add serde_json, proptest (dev), tempfile (dev).
-- `crates/pf-model/src/lib.rs` — re-architect from Phase-0 stub to module tree.
-- `crates/pf-model/src/{diff,serialize,merge}.rs` (new).
-- `crates/pf-model/tests/model_round_trip.rs` (new).
-- `claude-progress.json` — flip phase 5 to done when gate passes.
+- `crates/pf-merge/Cargo.toml` — add serde_json, proptest (dev), tempfile (dev).
+- `crates/pf-merge/src/lib.rs` — re-architect from Phase-0 stub to module tree.
+- `crates/pf-merge/src/{trace,world,effects,model,ancestor,engine}.rs` (new).
+- `crates/pf-merge/tests/merge_round_trip.rs` (new).
+- `claude-progress.json` — flip phase 6 to done when gate passes.
 
 ## Operator-only deliverables (cannot run from build agent)
 
@@ -92,6 +112,8 @@ These remain blocked on operator action, not on code:
   vLLM ≥0.10 in deterministic mode; gated behind `$PF_HAS_GPU=1`).
 - mergekit-equivalence test (needs Llama-3-8B base weights + Python
   `mergekit` install; gated behind `$PF_HAS_GPU=1`).
+- Live summarizer call for trace-merge (needs Anthropic API key; gated
+  behind the `live-summarizer` feature flag).
 
 ## Context-window discipline reminders
 

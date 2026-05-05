@@ -6,6 +6,33 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added — Phase 5 (model layer)
+
+- `pf-model::diff::ModelDiff`: tagged enum (`kind: lora|ia3|full|in-place-ttt`)
+  with one payload per kind:
+  - `LoraDelta` → list of `LoraAdapter { layer_id, matrix, rank, in_dim,
+    out_dim, a, b }` with dimension-validation on store. `canonicalize()`
+    sorts adapters by `(layer_id, matrix)` for digest stability.
+  - `IA3Delta` → `BTreeMap<layer_id_string, BTreeMap<matrix_name, scaling_vec>>`.
+  - `FullDelta` → `BTreeMap<param_name, dense_delta>`.
+  - `InPlaceTttDelta` → `Vec<TttStep>`, canonicalized by `step_id`.
+- `pf-model::serialize::store_diff` / `load_diff`: validate-and-canonicalize
+  + persist + restore through any `BlobStore` under wire format
+  `model.diff.v1`. Layout-tag mismatch surfaces as `Error::Integrity`.
+- `pf-model::merge::dare(delta, p, seed)`: drop fraction `p` of magnitudes,
+  rescale survivors by `1/(1-p)`. SplitMix64-deterministic given `seed`.
+- `pf-model::merge::ties_merge(deltas, params)`: TIES task arithmetic —
+  trim bottom `keep_top` quantile by magnitude, sign-elect by majority
+  magnitude, disjoint-merge same-sign survivors, scale by `alpha`. Default
+  `α=0.5`, `keep_top=0.2` per `agent_docs/architecture.md` §4.4.
+- 20 unit tests (DARE / TIES / trim / round-trip / canonicalize) + 4
+  integration tests (`tests/model_round_trip.rs`):
+  - every variant round-trips byte-identically through `FsBlobStore`
+  - DARE→TIES composition stays bounded
+  - CAS dedup on identical diffs
+  - 64-case proptest sweep over random delta lengths, asserting
+    `merged.len() == input.len()` and all entries finite.
+
 ### Added — Phase 4 (cache layer)
 
 - `pf-cache::format`: `paged-batchinvariant-v1` wire format —

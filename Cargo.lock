@@ -1210,7 +1210,10 @@ name = "pf-model"
 version = "0.1.0-dev"
 dependencies = [
  "pf-core",
+ "proptest",
  "serde",
+ "serde_json",
+ "tempfile",
  "thiserror 1.0.69",
  "tracing",
 ]
