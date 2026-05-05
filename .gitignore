@@ -47,3 +47,7 @@ benchmarks/results/local-*
 /book/
 /site/
 /coverage/
+
+# napi-rs binaries are platform-specific build artifacts
+crates/pf-ts/*.node
+crates/pf-ts/node_modules/
