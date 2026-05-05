@@ -1,6 +1,6 @@
 {
   "name": "@processfork/sdk",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "ProcessFork — fork() for AI agents (TypeScript SDK).",
   "license": "MIT",
   "homepage": "https://github.com/manav8498/processfork",
@@ -9,9 +9,11 @@
     "url": "git+https://github.com/manav8498/processfork.git",
     "directory": "crates/pf-ts"
   },
-  "main": "ts/index.js",
-  "types": "ts/index.d.ts",
+  "main": "./index.js",
+  "types": "./index.d.ts",
   "files": [
+    "index.js",
+    "index.d.ts",
     "ts/",
     "*.node"
   ],
