@@ -1,23 +1,11 @@
 # ProcessFork
 
-**Snapshot, branch, and merge live AI agent state — like `git`, for agents.**
+> **`git` for AI agents.** Snapshot, fork, and merge live LLM sessions in **8 ms**.
 
-You're four hours into a complex refactor with Claude Code. The agent has read 200 files, run 47 tests, opened a database, started a dev server. Then it suggests a sweeping change that breaks everything.
+You're 4 hours into a refactor with Claude Code. The agent has read 200 files, run 47 tests, opened a database, started a dev server. Then it suggests a destructive change.
 
-Today, you have two options: undo by hand, or start over.
-
-ProcessFork gives you a third:
-
-```bash
-$ pf snapshot
-sha256:1c2497b0…   ← 8 ms. Your entire agent state, captured.
-```
-
-That snapshot is now a real object you can fork, merge, push to a registry, clone on a different machine. The agent's memory (KV-cache), its sandbox files, its tool-call history, its model weights — all captured atomically into one content-addressed file.
-
-It's `git`. For AI agents.
-
-## What you can do with it
+**Today**: lose everything, undo by hand, or restart.
+**With ProcessFork**: `pf snapshot` → 8 ms → safe. Try 12 alternatives in parallel, merge the winner back, ship the whole session to a teammate.
 
 ```
                                  ┌─→ attempt #1   (broke build)
@@ -32,45 +20,49 @@ It's `git`. For AI agents.
    the winner
 ```
 
-| Situation                                       | What you do                              |
+## Highlights
+
+- ⚡ **8 ms snapshots.** Full agent state — model + KV-cache + files + tools + reasoning — into one content-addressed `.pfimg`.
+- 🌳 **Real fork & merge.** 12 parallel attempts share storage automatically (CoW). Merge the winner with a real 3-way diff (files, tools, trace) — git-style `<<<<<<<` markers and all.
+- 🔒 **Won't double-send your email.** HMAC-chained tool-call ledger; restored agents see prior side-effects as facts, not as actions to re-issue. (ACRFence-resistant.)
+- 🤝 **Drop-in for** Claude Code, LangGraph, OpenInterpreter, vLLM, SGLang, AutoGen, CrewAI.
+- 📦 **Single binary**, MIT, Rust core, Python + TypeScript SDKs. **200+ tests.**
+
+## When you'd reach for it
+
+| Situation                                       | Command                                  |
 |-------------------------------------------------|------------------------------------------|
-| Agent is about to do something destructive      | `pf snapshot pre-rm-rf` first            |
-| You're stuck and want to try 12 approaches      | `pf fork -n 12 --explore "fix the bug"`  |
+| Agent about to do something destructive         | `pf snapshot pre-rm-rf`                  |
+| Stuck — want to try 12 approaches in parallel   | `pf fork -n 12 --explore "fix bug"`      |
 | Hand off a complex session to a teammate        | `pf push hf://you/session-name`          |
 | Time-travel debug ("when did it go wrong?")     | `pf log` then `pf checkout <CID>`        |
-| RL rollout fabric (agent training)              | Same primitive: snapshot, fan out, score |
+| RL rollout fabric (agent training)              | snapshot, fan out, score, merge          |
 
-## How it pulls it off
+## How it works
 
-An "agent" at runtime is the simultaneous, mutating state of five things at once. ProcessFork captures all five **atomically**:
+ProcessFork captures the **five things** that together make up a live agent — atomically — into one content-addressed file:
 
 | Layer       | What it captures                                                |
 |-------------|-----------------------------------------------------------------|
 | **Model**   | LoRA / IA³ / full-finetune weight diffs, in-place TTT updates   |
 | **Cache**   | Paged KV-cache, content-addressed per page (CoW across forks)   |
-| **World**   | Filesystem, env vars, in-flight subprocesses, browser DOM       |
-| **Effects** | Append-only ledger of every irreversible tool call              |
+| **World**   | Filesystem, env, in-flight subprocesses, browser DOM            |
+| **Effects** | Append-only ledger of irreversible tool calls (HMAC-chained)    |
 | **Trace**   | Chat + tool-call message log                                    |
 
-Identical content shares storage automatically — twelve parallel forks use about 1.5× the space of one, not 12×.
-
-The merge engine handles each layer with the right algorithm: git-style 3-way diff for files, TIES + DARE for model weights, an HMAC-chained ledger that **never re-sends your email** when you restore (defends against ACRFence-style semantic-rollback attacks), and an LLM-summarized "what branch B learned" patch that gets injected into branch A's reasoning trace without re-prefilling the cache.
+Identical content shares storage automatically — twelve parallel forks use about 1.5× the space of one, not 12×. The merge engine handles each layer with the right algorithm: git-style 3-way diff for files, TIES + DARE for model weights, an HMAC chain that defends against semantic-rollback attacks (ACRFence), and an LLM-summarized "what branch B learned" patch injected into branch A's reasoning trace without re-prefilling the cache.
 
 See [Architecture overview](./architecture.md) for the full design.
 
 ## Status
 
-**v1.0** ships today:
+**v1.0** ships:
 
 - ✅ Atomic four-layer snapshot model
 - ✅ The 12-subcommand `pf` CLI
 - ✅ Python (pyo3) and TypeScript (napi-rs) SDKs
 - ✅ Five registry adapters (file end-to-end; HF / S3 / IPFS / OCI scaffolded for v1.0.1)
-- ✅ Seven first-party integration adapters (Claude Code / LangGraph / OpenInterpreter end-to-end today; vLLM / SGLang / AutoGen / CrewAI scaffolded)
+- ✅ Seven first-party integration adapters (Claude Code / LangGraph / OpenInterpreter / AutoGen / CrewAI today; vLLM / SGLang scaffolded for v1.0.1)
 - ✅ 200+ tests across Rust + Python + TypeScript
-
-The bit-exact replay against a real Llama-3-8B vLLM server (the kickoff frame's "snapshot a 380K-token agent in 87 ms") is the v1.0.1 deliverable — wire format and adapter API ship today, the live FFI lands next.
-
-See the [v1.0 release checklist](./release-checklist.md) for the full ship-gate matrix and what's deferred.
 
 Ready to try it? Start with [Install](./install.md) → [Your first fork](./first-fork.md).

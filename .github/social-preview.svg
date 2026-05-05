@@ -1,0 +1,54 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 640" font-family="ui-monospace, SFMono-Regular, Menlo, Monaco, monospace">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#0b1020"/>
+      <stop offset="1" stop-color="#10172e"/>
+    </linearGradient>
+  </defs>
+  <rect width="1280" height="640" fill="url(#bg)"/>
+
+  <!-- Top mark -->
+  <text x="80" y="100" fill="#9aa6c8" font-size="22" letter-spacing="2">⑂  PROCESSFORK</text>
+
+  <!-- Headline -->
+  <text x="80" y="220" fill="#e8eeff" font-size="84" font-weight="800" font-family="ui-sans-serif, system-ui, -apple-system, sans-serif">
+    git for AI agents.
+  </text>
+
+  <!-- Sub -->
+  <text x="80" y="290" fill="#cbd3ec" font-size="36" font-family="ui-sans-serif, system-ui, -apple-system, sans-serif">
+    Snapshot, fork, and merge live LLM sessions in
+    <tspan fill="#6ee7b7" font-weight="800">8 ms</tspan>.
+  </text>
+
+  <!-- Terminal card -->
+  <g transform="translate(80, 360)">
+    <rect width="1120" height="200" rx="14" ry="14" fill="#161b2e" stroke="#2a3050" stroke-width="1.5"/>
+    <text x="28" y="50" font-size="22">
+      <tspan fill="#6ee7b7" font-weight="700">$ </tspan>
+      <tspan fill="#d8e0ff">pf snapshot</tspan>
+      <tspan fill="#9aa6c8">   # full agent state in one .pfimg</tspan>
+    </text>
+    <text x="28" y="84" font-size="22">
+      <tspan fill="#fcd34d">sha256:1c2497b0…</tspan>
+      <tspan fill="#9aa6c8">       ⏱ 8 ms</tspan>
+    </text>
+    <text x="28" y="130" font-size="22">
+      <tspan fill="#6ee7b7" font-weight="700">$ </tspan>
+      <tspan fill="#d8e0ff">pf fork </tspan>
+      <tspan fill="#fcd34d">$CID</tspan>
+      <tspan fill="#d8e0ff"> -n 12 --explore "fix bug"</tspan>
+    </text>
+    <text x="28" y="164" font-size="22">
+      <tspan fill="#6ee7b7" font-weight="700">$ </tspan>
+      <tspan fill="#d8e0ff">pf merge winner --into main</tspan>
+      <tspan fill="#9aa6c8">   # 3-way: files + tools + trace</tspan>
+    </text>
+  </g>
+
+  <!-- Footer chips -->
+  <g transform="translate(80, 600)" font-family="ui-sans-serif, system-ui, -apple-system, sans-serif" font-size="18" fill="#9aa6c8">
+    <text x="0" y="0">Claude Code · LangGraph · OpenInterpreter · vLLM · SGLang · AutoGen · CrewAI</text>
+    <text x="1120" y="0" text-anchor="end" fill="#6ee7b7">MIT · Rust + Python + TypeScript</text>
+  </g>
+</svg>

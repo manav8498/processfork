@@ -1,0 +1,83 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 360" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="14">
+  <style>
+    .bg     { fill: #0b1020; }
+    .card   { fill: #161b2e; stroke: #2a3050; stroke-width: 1.5; rx: 12; ry: 12; }
+    .title  { fill: #e8eeff; font-size: 22px; font-weight: 700; }
+    .label  { fill: #9aa6c8; font-size: 13px; }
+    .ok     { fill: #6ee7b7; font-weight: 700; }
+    .warn   { fill: #fcd34d; }
+    .bad    { fill: #fda4af; }
+    .arrow  { stroke: #6ee7b7; stroke-width: 2; fill: none; }
+    .arrow2 { stroke: #9aa6c8; stroke-width: 1.5; fill: none; }
+    .term   { fill: #d8e0ff; }
+    .prompt { fill: #6ee7b7; font-weight: 700; }
+    .cid    { fill: #fcd34d; }
+    .num    { fill: #6ee7b7; font-weight: 800; font-size: 32px; }
+    .unit   { fill: #9aa6c8; font-size: 14px; }
+  </style>
+
+  <rect class="bg" width="1200" height="360"/>
+
+  <!-- Left: source agent -->
+  <g transform="translate(40,60)">
+    <rect class="card" width="240" height="240"/>
+    <text class="title" x="20" y="40">Live agent</text>
+    <text class="label" x="20" y="62">4-hour Claude Code session</text>
+    <text class="label" x="20" y="84">• 200 files read</text>
+    <text class="label" x="20" y="104">• 47 tests run</text>
+    <text class="label" x="20" y="124">• KV-cache loaded</text>
+    <text class="label" x="20" y="144">• DB + dev server up</text>
+    <text class="label" x="20" y="180" style="fill:#fda4af">⚠ about to make a</text>
+    <text class="label" x="20" y="198" style="fill:#fda4af">  destructive change</text>
+  </g>
+
+  <!-- Snapshot arrow + ms badge -->
+  <g transform="translate(296,180)">
+    <line class="arrow" x1="0" y1="0" x2="120" y2="0"/>
+    <polygon class="arrow" points="120,-6 132,0 120,6" fill="#6ee7b7" stroke="none"/>
+    <text class="prompt" x="-2" y="-22" font-size="13">pf snapshot</text>
+    <text class="num" x="40" y="36">8 ms</text>
+  </g>
+
+  <!-- Middle: snapshot fan-out -->
+  <g transform="translate(440,60)">
+    <rect class="card" width="320" height="240"/>
+    <text class="title" x="20" y="40">12 parallel attempts</text>
+    <text class="prompt" x="20" y="68" font-size="13">$ pf fork -n 12 --explore "fix bug"</text>
+
+    <g transform="translate(20,90)" font-size="13">
+      <text class="bad" y="14">#1  broke build</text>
+      <text class="warn" y="34">#2  looks promising</text>
+      <text class="ok"  y="54">#3  ✓ winner</text>
+      <text class="term" y="74">#4  …</text>
+      <text class="bad" y="94">#5  also broke</text>
+      <text class="term" y="114">#6  …</text>
+      <text class="term" y="134">#7  …</text>
+    </g>
+  </g>
+
+  <!-- Merge arrow -->
+  <g transform="translate(776,180)">
+    <line class="arrow" x1="0" y1="0" x2="120" y2="0"/>
+    <polygon class="arrow" points="120,-6 132,0 120,6" fill="#6ee7b7" stroke="none"/>
+    <text class="prompt" x="2" y="-22" font-size="13">pf merge winner</text>
+  </g>
+
+  <!-- Right: continued session -->
+  <g transform="translate(920,60)">
+    <rect class="card" width="240" height="240"/>
+    <text class="title" x="20" y="40">Resume + ship</text>
+    <text class="label" x="20" y="64">winner merged into main:</text>
+    <text class="ok" x="20" y="86" font-size="13">• files (3-way diff)</text>
+    <text class="ok" x="20" y="106" font-size="13">• tools (no double-send)</text>
+    <text class="ok" x="20" y="126" font-size="13">• reasoning (re-prefilled)</text>
+    <text class="prompt" x="20" y="166" font-size="13">$ pf push hf://you/sess</text>
+    <text class="label" x="20" y="186" font-size="13">teammate clones,</text>
+    <text class="label" x="20" y="206" font-size="13">picks up mid-thought.</text>
+  </g>
+
+  <!-- Footer headline -->
+  <text x="600" y="335" text-anchor="middle" class="label" font-size="14">
+    one content-addressed <tspan class="cid">.pfimg</tspan> file • atomic snapshot of model + KV-cache + files + tools + trace
+  </text>
+</svg>
