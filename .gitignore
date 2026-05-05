@@ -1,0 +1,49 @@
+# Rust
+/target
+/**/target
+Cargo.lock.bak
+*.rs.bk
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.venv/
+venv/
+.env
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Node
+node_modules/
+*.tsbuildinfo
+.npm/
+npm-debug.log*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editors
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# ProcessFork local state (caches, snapshots produced by tests)
+/.pf-store/
+/scratch/
+*.pfimg
+benchmarks/results/local-*
+
+# Generated docs
+/book/
+/site/
+/coverage/

@@ -1,0 +1,23 @@
+[package]
+name = "pf-ts"
+description = "ProcessFork TypeScript bindings (napi-rs)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[lints]
+workspace = true
+
+[dependencies]
+pf-core     = { workspace = true }
+napi        = { workspace = true }
+napi-derive = { workspace = true }
+
+[build-dependencies]
+napi-build = "2.1"

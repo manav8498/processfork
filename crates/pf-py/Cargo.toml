@@ -1,0 +1,26 @@
+[package]
+name = "pf-py"
+description = "ProcessFork Python bindings (pyo3)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[lib]
+name = "_pf_py"
+crate-type = ["cdylib", "rlib"]
+
+[lints]
+workspace = true
+
+[features]
+# Enable when building the cdylib for Python (maturin sets this automatically).
+# Off by default so `cargo test` can link libpython for the rlib half.
+default = []
+extension-module = ["pyo3/extension-module"]
+
+[dependencies]
+pf-core = { workspace = true }
+pyo3    = { workspace = true }

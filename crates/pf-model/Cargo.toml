@@ -1,0 +1,18 @@
+[package]
+name = "pf-model"
+description = "ProcessFork model layer: weight-diff capture (LoRA / IA³ / full) + TIES & DARE merge"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+pf-core   = { workspace = true }
+serde     = { workspace = true }
+thiserror = { workspace = true }
+tracing   = { workspace = true }

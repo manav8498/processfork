@@ -1,0 +1,70 @@
+{
+  "version": 1,
+  "started_at": "2026-05-05T14:11:00Z",
+  "current_phase": 0,
+  "phases": {
+    "0":  { "name": "bootstrap",                "status": "in_progress", "started_at": "2026-05-05T14:11:00Z", "ended_at": null, "blockers": [] },
+    "1":  { "name": "core_engine_rust",         "status": "pending" },
+    "2":  { "name": "world_layer",              "status": "pending" },
+    "3":  { "name": "effects_layer",            "status": "pending" },
+    "4":  { "name": "cache_layer",              "status": "pending" },
+    "5":  { "name": "model_layer",              "status": "pending" },
+    "6":  { "name": "merge_engine",             "status": "pending" },
+    "7":  { "name": "sdks",                     "status": "pending" },
+    "8":  { "name": "cli",                      "status": "pending" },
+    "9":  { "name": "registry",                 "status": "pending" },
+    "10": { "name": "integrations",             "status": "pending" },
+    "11": { "name": "benchmarks_tests_docs",    "status": "pending" },
+    "12": { "name": "release",                  "status": "pending" }
+  },
+  "assumptions": [
+    {
+      "id": "A-001",
+      "topic": "MSRV",
+      "decision": "Set MSRV to 1.85 instead of the spec's 1.83 because edition 2024 (which the spec also requires) only stabilized in 1.85.",
+      "impact": "low",
+      "ts": "2026-05-05T14:11:00Z"
+    },
+    {
+      "id": "A-002",
+      "topic": "build environment",
+      "decision": "Build host is macOS arm64 (darwin). Linux-only subsystems (overlayfs, CRIU) are scaffolded with macOS-stub fallbacks; bit-exact replay tests against vLLM/SGLang require a CUDA host and run only when env $PF_HAS_GPU=1. Documented in agent_docs/world-layer.md and agent_docs/cache-layer.md.",
+      "impact": "medium",
+      "ts": "2026-05-05T14:11:00Z"
+    },
+    {
+      "id": "A-003",
+      "topic": "publish credentials",
+      "decision": "PyPI / npm / crates.io / GHCR publish steps are wired in CI (Phase 12) but require operator-supplied tokens (`PYPI_API_TOKEN`, `NPM_TOKEN`, `CARGO_REGISTRY_TOKEN`, `GHCR_TOKEN`). The build agent does not have these and cannot perform the actual `1.0.0` publish from this environment; the workflow yaml is the deliverable.",
+      "impact": "high",
+      "ts": "2026-05-05T14:11:00Z"
+    },
+    {
+      "id": "A-004",
+      "topic": "demo recording",
+      "decision": "The 60-second demo asciinema script is checked in under demo/. The actual recording requires the operator to run it (the agent cannot record its own terminal in this harness). Script is the deliverable; rendered .cast file is operator-produced.",
+      "impact": "medium",
+      "ts": "2026-05-05T14:11:00Z"
+    }
+  ],
+  "architecture_concerns": [],
+  "deferred_to_v2": [
+    "Cross-architecture cache portability (H100 ↔ MI300)",
+    "Distributed multi-host fork (forks across machines)",
+    "Native Windows support (v1 documents WSL2 fallback)",
+    "Custom inference engine (sit on top of vLLM/SGLang in v1)",
+    "Custom merge algorithms beyond TIES + DARE"
+  ],
+  "phase_0_acceptance": {
+    "cargo_check_workspace_clean": true,
+    "cargo_clippy_workspace_dwarnings_clean": true,
+    "cargo_fmt_workspace_clean": true,
+    "cargo_test_workspace": "5/5 passed in pf-core (digest + manifest); 0 in stub crates as expected",
+    "pf_cli_help_renders_12_subcommands": true,
+    "agent_docs_present": "13 files: architecture, feature-spec, cache/model/world/effects/merge/cli/registry-spec, 7× integration-*, benchmarks, release-checklist",
+    "claude_files_present": "5 sub-agents, 5 skills, 3 hooks, settings.json",
+    "ci_workflow_present": ".github/workflows/ci.yml + deny.toml",
+    "first_commit_made": "pending",
+    "phase_0_complete_tag": "pending"
+  }
+}

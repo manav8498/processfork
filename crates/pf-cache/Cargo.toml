@@ -1,0 +1,18 @@
+[package]
+name = "pf-cache"
+description = "ProcessFork cache layer: paged KV-cache serialization with batch-invariant kernels"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+pf-core   = { workspace = true }
+serde     = { workspace = true }
+thiserror = { workspace = true }
+tracing   = { workspace = true }
