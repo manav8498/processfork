@@ -6,6 +6,44 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added — Phase 7 (SDKs)
+
+- **Python SDK (`crates/pf-py/`)** — pyo3 0.22 bindings:
+  - `processfork.PfStore.open(path)` — opens a store, `~` expanded.
+  - `processfork.snapshot_filesystem(store, agent_kind, fs_root, env, messages)`
+    captures all four layers + trace into a single manifest.
+  - `processfork.checkout_filesystem(store, cid, target_path)` restores
+    the world-layer FS tree atomically.
+  - `processfork.read_manifest(store, cid)` returns the manifest as a
+    Python `dict`.
+  - `processfork.merge(store, a, b, alpha?, dare_p?, seed?)` runs the
+    full Phase-6 engine; returns
+    `{merged_cid, ancestor, overall, world_conflicts, trace_summary,
+     model_applied_task_arithmetic}`.
+  - `processfork.digest_of(bytes)` SHA-256 helper.
+  - Hand-written type stubs at
+    `crates/pf-py/python/processfork/_pf_py.pyi` + `py.typed` marker so
+    `mypy --strict` callers get full hints.
+  - `pyproject.toml` driving `maturin build --release --features
+    extension-module`. Verified end-to-end: built a wheel, installed it
+    into a fresh `uv venv` (Python 3.12), and ran 5 smoke tests
+    (`crates/pf-py/python/tests/test_smoke.py`) — all pass.
+
+- **TypeScript SDK (`crates/pf-ts/`)** — napi-rs 2.16 bindings:
+  - `PfStore.open(path)` (factory), `physicalBytes()`.
+  - `snapshotFilesystem`, `checkoutFilesystem`, `readManifest`, `merge`,
+    `digestOf` — same surface as Python.
+  - `MergeReport` / `WorldConflict` / `Message` / `MergeOpts` typed
+    objects via `#[napi(object)]`.
+  - Auto-generated `index.d.ts` + `index.js` from `napi build --release`.
+  - Thin TS wrapper at `ts/index.ts` adds JSON-parsed `readManifest`
+    and a typed `Manifest` interface.
+  - `package.json` configured for napi triple-resolution across
+    `x86_64-linux`, `aarch64-linux`, `aarch64-darwin`, `x86_64-darwin`.
+  - `tsconfig.json` for the TS wrapper. Verified end-to-end: built
+    `processfork.darwin-arm64.node` (1.8 MB) and ran 5 smoke tests
+    (`crates/pf-ts/test/smoke.mjs`) via `node --test` — all pass.
+
 ### Added — Phase 6 (merge engine)
 
 - `pf-merge::ancestor::find_lca`: BFS lowest-common-ancestor walk over

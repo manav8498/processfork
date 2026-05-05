@@ -22,5 +22,11 @@ default = []
 extension-module = ["pyo3/extension-module"]
 
 [dependencies]
-pf-core = { workspace = true }
-pyo3    = { workspace = true }
+pf-core    = { workspace = true }
+pf-world   = { workspace = true }
+pf-effects = { workspace = true }
+pf-merge   = { workspace = true }
+pf-model   = { workspace = true }
+pyo3       = { workspace = true }
+serde_json = { workspace = true }
+chrono     = { workspace = true }

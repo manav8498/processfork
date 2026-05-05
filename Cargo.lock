@@ -994,6 +994,8 @@ dependencies = [
  "napi-derive",
  "napi-sys",
  "once_cell",
+ "serde",
+ "serde_json",
  "tokio",
 ]
 
@@ -1226,8 +1228,14 @@ dependencies = [
 name = "pf-py"
 version = "0.1.0-dev"
 dependencies = [
+ "chrono",
  "pf-core",
+ "pf-effects",
+ "pf-merge",
+ "pf-model",
+ "pf-world",
  "pyo3",
+ "serde_json",
 ]
 
 [[package]]
@@ -1246,10 +1254,17 @@ dependencies = [
 name = "pf-ts"
 version = "0.1.0-dev"
 dependencies = [
+ "chrono",
  "napi",
  "napi-build",
  "napi-derive",
  "pf-core",
+ "pf-effects",
+ "pf-merge",
+ "pf-model",
+ "pf-world",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

@@ -1,0 +1,42 @@
+{
+  "name": "@processfork/sdk",
+  "version": "0.1.0-dev.0",
+  "description": "ProcessFork — fork() for AI agents (TypeScript SDK).",
+  "license": "MIT",
+  "homepage": "https://processfork.dev",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/processfork/processfork.git",
+    "directory": "crates/pf-ts"
+  },
+  "main": "ts/index.js",
+  "types": "ts/index.d.ts",
+  "files": [
+    "ts/",
+    "*.node"
+  ],
+  "napi": {
+    "name": "processfork",
+    "triples": {
+      "defaults": true,
+      "additional": [
+        "x86_64-unknown-linux-gnu",
+        "aarch64-unknown-linux-gnu",
+        "aarch64-apple-darwin",
+        "x86_64-apple-darwin"
+      ]
+    }
+  },
+  "scripts": {
+    "build": "napi build --release --platform",
+    "build:debug": "napi build --platform",
+    "test": "node --test test/smoke.mjs"
+  },
+  "devDependencies": {
+    "@napi-rs/cli": "^2.18.4",
+    "typescript": "^5.4.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
