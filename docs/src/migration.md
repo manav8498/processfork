@@ -46,7 +46,7 @@ vllm serve meta-llama/Llama-3-8B \
   --plugin processfork
 ```
 
-(Live HTTP wiring lands in v1.0.1 per [adapter README](https://github.com/processfork/processfork/tree/main/adapters/pf-vllm).)
+(Live HTTP wiring lands in v1.0.1 per [adapter README](https://github.com/manav8498/processfork/tree/main/adapters/pf-vllm).)
 
 ## SGLang
 

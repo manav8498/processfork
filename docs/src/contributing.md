@@ -1,6 +1,6 @@
 # Contributing
 
-> Source: [`CONTRIBUTING.md`](https://github.com/processfork/processfork/blob/main/CONTRIBUTING.md).
+> Source: [`CONTRIBUTING.md`](https://github.com/manav8498/processfork/blob/main/CONTRIBUTING.md).
 
 ## Pull request requirements
 

@@ -3,7 +3,7 @@ name = "example-01-hello-fork"
 description = "Capture a synthetic four-layer ProcessFork snapshot end-to-end."
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.85"
+rust-version = "1.88"
 license = "MIT"
 publish = false
 
@@ -12,5 +12,5 @@ name = "hello-fork"
 path = "src/main.rs"
 
 [dependencies]
-pf-core = { path = "../../crates/pf-core" }
+pf-core = { path = "../../crates/pf-core", version = "1.0.0" }
 tempfile = "3.13"

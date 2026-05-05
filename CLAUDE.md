@@ -5,8 +5,8 @@ This is the build-agent contract. Keep it short. Subsystem detail lives in
 
 ## Toolchain
 
-- Rust **edition 2024**, MSRV **1.85** (the spec said 1.83; edition 2024
-  requires 1.85 — recorded in `claude-progress.json/assumptions[]`).
+- Rust **edition 2024**, MSRV **1.88** (the spec said 1.83; edition 2024
+  requires 1.88 — recorded in `claude-progress.json/assumptions[]`).
 - Python **3.11+**, formatted with `ruff` and type-checked with `mypy --strict`.
 - TypeScript with `biome` for lint + format.
 - Run `cargo fmt --all` and `cargo clippy --all-targets -- -D warnings` before

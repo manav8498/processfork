@@ -26,9 +26,9 @@ classifiers = [
 
 [project.urls]
 Homepage      = "https://processfork.dev"
-Repository    = "https://github.com/processfork/processfork"
+Repository    = "https://github.com/manav8498/processfork"
 Documentation = "https://processfork.dev/docs"
-Issues        = "https://github.com/processfork/processfork/issues"
+Issues        = "https://github.com/manav8498/processfork/issues"
 
 [tool.maturin]
 module-name = "processfork._pf_py"

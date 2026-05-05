@@ -1,7 +1,7 @@
 # The 60-second demo
 
 The original elevator pitch from the kickoff prompt — translated into a
-real, runnable script. Source: [`demo/script.cast.md`](https://github.com/processfork/processfork/blob/main/demo/script.cast.md).
+real, runnable script. Source: [`demo/script.cast.md`](https://github.com/manav8498/processfork/blob/main/demo/script.cast.md).
 
 > 0:00 — A developer is 4 hours into a Claude Code session refactoring a
 > monorepo. KV cache is 380K tokens. Postgres running. Playwright open.

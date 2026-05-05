@@ -6,7 +6,7 @@
   "homepage": "https://processfork.dev",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/processfork/processfork.git",
+    "url": "git+https://github.com/manav8498/processfork.git",
     "directory": "crates/pf-ts"
   },
   "main": "ts/index.js",

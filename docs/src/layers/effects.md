@@ -1,6 +1,6 @@
 # Effects layer
 
-> Engineering source: [`agent_docs/effects-layer.md`](https://github.com/processfork/processfork/blob/main/agent_docs/effects-layer.md).
+> Engineering source: [`agent_docs/effects-layer.md`](https://github.com/manav8498/processfork/blob/main/agent_docs/effects-layer.md).
 
 The append-only ledger of every external side-effect the agent has
 caused. Defends against the **semantic-rollback attack** (ACRFence,

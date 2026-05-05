@@ -1,6 +1,6 @@
 # v1.0 release checklist
 
-> Source: [`agent_docs/release-checklist.md`](https://github.com/processfork/processfork/blob/main/agent_docs/release-checklist.md).
+> Source: [`agent_docs/release-checklist.md`](https://github.com/manav8498/processfork/blob/main/agent_docs/release-checklist.md).
 
 ## Pre-flight
 

@@ -16,6 +16,9 @@
 // `use std::fmt::Write` inside a function for the `write!` macro is
 // idiomatic; clippy::items_after_statements doesn't help here.
 #![allow(clippy::items_after_statements)]
+// `collapsible_if` (new in Rust 1.88) fights nested staircase
+// `if let Some(...) = strip_prefix(...) { if let Ok(home) = var(...) }`.
+#![allow(clippy::collapsible_if)]
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;

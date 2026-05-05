@@ -40,7 +40,10 @@
 #![allow(clippy::useless_conversion)]
 // `snapshot_filesystem` is one big sequenced layer-capture; splitting
 // into helpers would obscure the reading order, not aid clarity.
-#![allow(clippy::too_many_lines)]
+// `collapsible_if` (new in Rust 1.88) fights nested `if let Some(...)
+// = strip_prefix(...) { if let Ok(home) = var(...) }` which reads
+// better as a staircase than a let-chain in this binding code.
+#![allow(clippy::too_many_lines, clippy::collapsible_if)]
 
 use std::path::PathBuf;
 use std::sync::Arc;

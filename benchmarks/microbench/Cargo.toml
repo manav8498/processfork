@@ -11,9 +11,9 @@ publish = false
 path = "src/lib.rs"
 
 [dependencies]
-pf-core    = { path = "../../crates/pf-core" }
-pf-cache   = { path = "../../crates/pf-cache" }
-pf-merge   = { path = "../../crates/pf-merge" }
+pf-core    = { path = "../../crates/pf-core",  version = "1.0.0" }
+pf-cache   = { path = "../../crates/pf-cache", version = "1.0.0" }
+pf-merge   = { path = "../../crates/pf-merge", version = "1.0.0" }
 serde_json = "1.0"
 tempfile   = "3.13"
 chrono     = { version = "0.4", features = ["serde"] }

@@ -1,6 +1,6 @@
 # Model layer
 
-> Engineering source: [`agent_docs/model-layer.md`](https://github.com/processfork/processfork/blob/main/agent_docs/model-layer.md).
+> Engineering source: [`agent_docs/model-layer.md`](https://github.com/manav8498/processfork/blob/main/agent_docs/model-layer.md).
 
 Captures the difference between the running model's weights and a
 known base. Four kinds:

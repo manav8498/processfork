@@ -2,7 +2,7 @@
   "version": 1,
   "started_at": "2026-05-05T14:11:00Z",
   "current_phase": 12,
-  "current_phase_status": "done — v1.0.0 tagged. All 12 phases complete.",
+  "current_phase_status": "done — v1.0.0 tagged + post-tag paranoid pass green; pushed to github.com/manav8498/processfork.",
   "phases": {
     "0":  { "name": "bootstrap",                "status": "done",        "started_at": "2026-05-05T14:11:00Z", "ended_at": "2026-05-05T14:30:00Z", "tag": "phase-0-complete", "blockers": [] },
     "1":  { "name": "core_engine_rust",         "status": "done",        "started_at": "2026-05-05T14:30:00Z", "ended_at": "2026-05-05T14:55:00Z", "tag": "phase-1-complete", "blockers": [], "results": { "snapshot_p99_ms": 8, "snapshot_budget_ms": 500, "dedup_growth_bytes": 614, "twelve_fork_ratio": "well under 1.5x" } },
@@ -46,6 +46,27 @@
       "decision": "The 60-second demo asciinema script is checked in under demo/. The actual recording requires the operator to run it (the agent cannot record its own terminal in this harness). Script is the deliverable; rendered .cast file is operator-produced.",
       "impact": "medium",
       "ts": "2026-05-05T14:11:00Z"
+    },
+    {
+      "id": "A-005",
+      "topic": "MSRV bump from 1.85 → 1.88",
+      "decision": "Discovered by `docker build .` against rust:1.85-slim that the transitive `home` crate (pulled via cargo-internals deps) requires Rust 1.88. Bumped workspace.package.rust-version + Dockerfile + CI workflows + CLAUDE.md to 1.88. The original spec said 1.83; ed.2024 already required 1.85; this brings us honestly to what the dep graph actually demands.",
+      "impact": "low",
+      "ts": "2026-05-05T22:30:00Z"
+    },
+    {
+      "id": "A-006",
+      "topic": "bincode dropped",
+      "decision": "bincode 1.x went unmaintained 2025-11 (RUSTSEC-2025-0141). We declared it as a workspace dep but never `use`d it — every blob format in v1 is JSON. Dropped entirely rather than ignoring the advisory.",
+      "impact": "low",
+      "ts": "2026-05-05T22:30:00Z"
+    },
+    {
+      "id": "A-007",
+      "topic": "pyo3 vuln (RUSTSEC-2025-0020) ignored",
+      "decision": "pyo3 0.22.6 has a buffer-overflow risk in PyString::from_object. We never call that function (only wrap_pyfunction! and PyDict::new_bound). Added to deny.toml ignore list with an explanatory comment; v1.0.1 should bump to pyo3 0.24+ which requires reworking the #[pymodule] signature + Bound API tightening.",
+      "impact": "medium",
+      "ts": "2026-05-05T22:30:00Z"
     }
   ],
   "architecture_concerns": [],

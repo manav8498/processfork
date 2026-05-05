@@ -2,7 +2,7 @@
 # Multi-stage Dockerfile producing a slim container with the `pf` CLI.
 # Built and pushed to ghcr.io/<owner>/processfork:<tag> on release.
 
-FROM rust:1.85-slim AS build
+FROM rust:1.88-slim AS build
 WORKDIR /src
 COPY Cargo.toml Cargo.lock ./
 COPY crates ./crates

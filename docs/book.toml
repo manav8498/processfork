@@ -3,15 +3,13 @@ title = "ProcessFork"
 authors = ["ProcessFork Authors"]
 description = "fork() for AI agents — snapshot, branch, and merge live agent state."
 language = "en"
-multilingual = false
 src = "src"
 
 [output.html]
 default-theme = "light"
 preferred-dark-theme = "navy"
-git-repository-url = "https://github.com/processfork/processfork"
-git-repository-icon = "fa-github"
-edit-url-template = "https://github.com/processfork/processfork/edit/main/docs/{path}"
+git-repository-url = "https://github.com/manav8498/processfork"
+edit-url-template = "https://github.com/manav8498/processfork/edit/main/docs/{path}"
 
 [output.html.fold]
 enable = true

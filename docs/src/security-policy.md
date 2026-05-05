@@ -1,6 +1,6 @@
 # Security policy
 
-> Source: [`SECURITY.md`](https://github.com/processfork/processfork/blob/main/SECURITY.md).
+> Source: [`SECURITY.md`](https://github.com/manav8498/processfork/blob/main/SECURITY.md).
 
 ## Reporting
 

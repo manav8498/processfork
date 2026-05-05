@@ -20,7 +20,7 @@ arm64).
 ## Build from source
 
 ```bash
-git clone https://github.com/processfork/processfork
+git clone https://github.com/manav8498/processfork
 cd processfork
 
 # Rust workspace:

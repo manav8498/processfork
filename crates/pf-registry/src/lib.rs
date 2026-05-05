@@ -26,7 +26,15 @@
 // documented per-symbol in submodules
 // async_trait emits future-proxy types that clippy quibbles with;
 // these allows scope to the registry crate only.
-#![allow(clippy::needless_pass_by_value, clippy::module_name_repetitions)]
+// `collapsible_if` was introduced in Rust 1.88's clippy; the
+// transitive-blob walker (registry.rs) deliberately uses staircase
+// `if let Ok(...)` blocks for readability over `let-else`.
+#![allow(
+    clippy::needless_pass_by_value,
+    clippy::module_name_repetitions,
+    clippy::collapsible_if,
+    clippy::collapsible_match
+)]
 
 pub mod file;
 pub mod hf;

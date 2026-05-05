@@ -1,6 +1,6 @@
 # Three-way merge protocol
 
-> Engineering source: [`agent_docs/merge-protocol.md`](https://github.com/processfork/processfork/blob/main/agent_docs/merge-protocol.md).
+> Engineering source: [`agent_docs/merge-protocol.md`](https://github.com/manav8498/processfork/blob/main/agent_docs/merge-protocol.md).
 
 `pf merge B --into A` takes the work that happened on branch B since
 common ancestor X, and applies it to A. ProcessFork merges across all

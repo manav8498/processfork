@@ -1,6 +1,6 @@
 # Security model
 
-> Engineering source: [`SECURITY.md`](https://github.com/processfork/processfork/blob/main/SECURITY.md).
+> Engineering source: [`SECURITY.md`](https://github.com/manav8498/processfork/blob/main/SECURITY.md).
 
 Four threat categories:
 

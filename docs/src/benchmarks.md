@@ -1,6 +1,6 @@
 # Benchmarks
 
-> Live results: [`benchmarks/RESULTS.md`](https://github.com/processfork/processfork/blob/main/benchmarks/RESULTS.md).
+> Live results: [`benchmarks/RESULTS.md`](https://github.com/manav8498/processfork/blob/main/benchmarks/RESULTS.md).
 
 Two suites:
 

@@ -22,7 +22,7 @@ synthetic 4-layer fixture (32 cache pages × 16 KiB + 64 fs files ×
 
 Real bit-exact replay against vLLM ≥0.10 + Llama-3-8B is
 operator-runs-it (`$PF_HAS_GPU=1`). Numbers land in
-[`benchmarks/RESULTS.md`](https://github.com/processfork/processfork/blob/main/benchmarks/RESULTS.md)
+[`benchmarks/RESULTS.md`](https://github.com/manav8498/processfork/blob/main/benchmarks/RESULTS.md)
 when the operator runs the gated lane.
 
 ## Tuning knobs

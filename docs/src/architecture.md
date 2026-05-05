@@ -1,6 +1,6 @@
 # Architecture overview
 
-> Canonical engineering source: [`agent_docs/architecture.md`](https://github.com/processfork/processfork/blob/main/agent_docs/architecture.md).
+> Canonical engineering source: [`agent_docs/architecture.md`](https://github.com/manav8498/processfork/blob/main/agent_docs/architecture.md).
 > This doc is the user-facing version.
 
 ## The four-layer model

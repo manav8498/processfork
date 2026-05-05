@@ -1,6 +1,6 @@
 # `pf` CLI overview
 
-> Engineering source: [`agent_docs/cli-spec.md`](https://github.com/processfork/processfork/blob/main/agent_docs/cli-spec.md).
+> Engineering source: [`agent_docs/cli-spec.md`](https://github.com/manav8498/processfork/blob/main/agent_docs/cli-spec.md).
 
 Single static binary, <15 MB stripped. Twelve subcommands; ten wired
 in v1.0, three deferred to Phase 9 (push / pull / clone — wired in
