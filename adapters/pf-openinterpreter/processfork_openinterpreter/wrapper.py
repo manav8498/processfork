@@ -52,6 +52,12 @@ class WrappedInterpreter:
                 + hashlib.sha256(
                     json.dumps(e.get("args", {}), sort_keys=True).encode()
                 ).hexdigest(),
+                # v1.0.5 audit: OI ledger entries now include `result`,
+                # so `result_hash` is no longer empty.
+                "result_hash": "sha256:"
+                + hashlib.sha256(
+                    json.dumps(e.get("result", ""), sort_keys=True, default=str).encode()
+                ).hexdigest(),
                 "side_effect_class": e.get("side_effect_class", "irreversible"),
                 "idempotency_key": "sha256:"
                 + hashlib.sha256(
@@ -106,15 +112,31 @@ class WrappedInterpreter:
         return result
 
     def run(self, language: str, code: str) -> Any:
-        """Forward to `interpreter.computer.run`, recording into the
-        wrapper's effect ledger."""
+        """Forward to `interpreter.computer.run`, recording the call
+        and its result into the wrapper's effect ledger.
+
+        v1.0.5 audit fix: prior versions stored only the args; the
+        result was dropped on the floor and `result_hash` came out
+        empty. We now stash the return value (truncated to 8 KiB so a
+        runaway shell command doesn't bloat the ledger) and the
+        snapshot path hashes it just like the Claude Code adapter.
+        """
+        result = self.inner.computer.run(language, code)
+        # OpenInterpreter's run() returns either a string (stdout) or
+        # a dict with stdout/stderr/exit_code; both shapes are JSON-
+        # serializable. Truncate big payloads — the hash captures the
+        # full shape for ACRFence even if we display only a prefix.
+        result_repr = str(result) if not isinstance(result, (dict, list)) else result
+        if isinstance(result_repr, str) and len(result_repr) > 8192:
+            result_repr = result_repr[:8192] + "…[truncated]"
         ledger_entry = {
             "tool": f"oi.computer.run.{language}",
             "args": {"code": code},
+            "result": result_repr,
             "side_effect_class": "irreversible",
         }
         self._ledger.append(ledger_entry)
-        return self.inner.computer.run(language, code)
+        return result
 
     # ---- helpers ----
 

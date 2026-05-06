@@ -109,7 +109,7 @@ Identical content shares storage automatically — 12 parallel forks use **~1.5�
 
 ## Status
 
-`v1.0.4` tagged. Closes 4 follow-up audit findings: `--trace-from-jsonl` now validates JSON content per line, real snapshot quiescence via `--pause-pid` (SIGSTOP/SIGCONT RAII guard), the 3 adapter recorders (Claude Code / OpenInterpreter / AutoGen) now persist their recorded tool calls into the effects ledger end-to-end (closing the ACRFence claim), and `examples/02` reflects the live HF/file:// registries. v1.0.3 [security advisories](./SECURITY.md) `PF-SA-2026-001` (Zip Slip) and `PF-SA-2026-002` (env-var leakage) remain in force — **operators on v1.0.0–v1.0.2 should still upgrade and rotate any secrets that may have been in their environment at snapshot time**.
+`v1.0.5` tagged. Closes 4 follow-up audit findings (round 3): the npm package now ships its native binary at the package root (was a hard install blocker for `@processfork/sdk@≤1.0.5` — first installable npm version is **1.0.6**); OpenInterpreter ledger entries now include `result_hash`; `--quiesce-cmd` / `--resume-cmd` give the operator an app-level transaction-boundary hook (paired with `--pause-pid` for OS-level pause); `_pf_py.pyi` matches the runtime signature including `effects`. v1.0.3 [security advisories](./SECURITY.md) remain in force.
 
 | metric                                                 | observed                 | target           |
 |--------------------------------------------------------|--------------------------|------------------|

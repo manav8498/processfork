@@ -273,8 +273,34 @@ jobs:
           path: artifacts/
       - name: stage napi binaries
         run: |
-          mkdir -p crates/pf-ts/binaries
-          cp artifacts/napi-*/*.node crates/pf-ts/binaries/ || true
+          # The napi loader (index.js) requires ./processfork.<platform>.node
+          # at the package root. v1.0.4 audit caught this: binaries were
+          # being staged into binaries/ which the `files` glob in
+          # package.json doesn't pick up, so the published tarball had
+          # NO native binary and `import` failed at install time.
+          set -e
+          shopt -s nullglob
+          binaries=( artifacts/napi-*/*.node )
+          if [[ ${#binaries[@]} -eq 0 ]]; then
+            echo "::error::no napi binaries found in artifacts/"
+            exit 1
+          fi
+          for b in "${binaries[@]}"; do
+            cp -v "$b" crates/pf-ts/
+          done
+          echo "staged native binaries:"
+          ls -lh crates/pf-ts/*.node
+      - name: verify package contents include .node files
+        run: |
+          # Dry-run pack and grep for .node entries — fail fast if the
+          # publish would ship without a native binary.
+          set -e
+          cd crates/pf-ts
+          contents=$(npm pack --dry-run 2>&1 | tee /tmp/npm-pack.log)
+          if ! echo "$contents" | grep -qE '\.node'; then
+            echo "::error::npm pack would not include any .node binary; aborting publish"
+            exit 1
+          fi
       - run: npm publish --access public
         working-directory: crates/pf-ts
         env:

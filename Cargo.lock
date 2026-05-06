@@ -2136,7 +2136,7 @@ checksum = "9b4f627cb1b25917193a259e49bdad08f671f8d9708acfd5fe0a8c1455d87220"
 
 [[package]]
 name = "pf-cache"
-version = "1.0.4"
+version = "1.0.5"
 dependencies = [
  "bytes",
  "parking_lot",
@@ -2152,7 +2152,7 @@ dependencies = [
 
 [[package]]
 name = "pf-core"
-version = "1.0.4"
+version = "1.0.5"
 dependencies = [
  "bytes",
  "chrono",
@@ -2172,7 +2172,7 @@ dependencies = [
 
 [[package]]
 name = "pf-effects"
-version = "1.0.4"
+version = "1.0.5"
 dependencies = [
  "chrono",
  "hex",
@@ -2189,7 +2189,7 @@ dependencies = [
 
 [[package]]
 name = "pf-merge"
-version = "1.0.4"
+version = "1.0.5"
 dependencies = [
  "chrono",
  "pf-core",
@@ -2219,7 +2219,7 @@ dependencies = [
 
 [[package]]
 name = "pf-model"
-version = "1.0.4"
+version = "1.0.5"
 dependencies = [
  "pf-core",
  "proptest",
@@ -2232,7 +2232,7 @@ dependencies = [
 
 [[package]]
 name = "pf-py"
-version = "1.0.4"
+version = "1.0.5"
 dependencies = [
  "chrono",
  "pf-core",
@@ -2246,7 +2246,7 @@ dependencies = [
 
 [[package]]
 name = "pf-registry"
-version = "1.0.4"
+version = "1.0.5"
 dependencies = [
  "async-trait",
  "aws-config",
@@ -2271,7 +2271,7 @@ dependencies = [
 
 [[package]]
 name = "pf-ts"
-version = "1.0.4"
+version = "1.0.5"
 dependencies = [
  "chrono",
  "napi",
@@ -2288,7 +2288,7 @@ dependencies = [
 
 [[package]]
 name = "pf-world"
-version = "1.0.4"
+version = "1.0.5"
 dependencies = [
  "chrono",
  "futures-util",
@@ -2436,7 +2436,7 @@ dependencies = [
 
 [[package]]
 name = "processfork"
-version = "1.0.4"
+version = "1.0.5"
 dependencies = [
  "anyhow",
  "assert_cmd",

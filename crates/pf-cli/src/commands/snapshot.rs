@@ -62,8 +62,33 @@ pub struct Args {
     /// just the fs walk + env capture (typically 50–500 ms); CRIU /
     /// CDP capture happens before the pause to keep the window tight.
     /// Unix only — ignored on Windows where SIGSTOP doesn't exist.
+    ///
+    /// **Important**: `--pause-pid` freezes the process at OS scheduler
+    /// level but cannot bracket app-level transactions. If the agent
+    /// is mid-way through a multi-file update when we SIGSTOP it, the
+    /// captured tree will still be torn. Use `--quiesce-cmd` for
+    /// app-level coordination.
     #[arg(long)]
     pub pause_pid: Option<i32>,
+
+    /// Command to invoke immediately before the fs walk to ask the
+    /// agent to enter a quiescent state (finish its current
+    /// transaction, flush buffers, etc.). Pair with `--resume-cmd`
+    /// to release. Examples:
+    ///
+    ///   --quiesce-cmd 'curl -fsS -XPOST http://agent/admin/quiesce' \
+    ///   --resume-cmd  'curl -fsS -XPOST http://agent/admin/resume'
+    ///
+    /// Closes the v1.0.4 audit's "SIGSTOP doesn't bracket app-level
+    /// multi-file transactions" finding by giving the operator a
+    /// hook into their app's transaction boundary.
+    #[arg(long)]
+    pub quiesce_cmd: Option<String>,
+
+    /// Command to run after the snapshot finishes (whether it
+    /// succeeded or failed). Pair with `--quiesce-cmd`.
+    #[arg(long)]
+    pub resume_cmd: Option<String>,
 }
 
 // `pf snapshot run()` accumulated a fair amount of validation +
@@ -117,10 +142,17 @@ pub fn run(store_root: &Path, args: Args) -> anyhow::Result<()> {
     // can keep writing without risking the mid-snapshot torn state
     // that the v1.0.2 audit reproduced (a.txt v1, b.txt v0).
     //
-    // For real cross-file atomicity (APFS clone alone isn't enough —
-    // the agent could still be mid-write between two files when the
-    // clone fires), pass `--pause-pid <pid>`: we SIGSTOP the agent,
-    // run the capture, then SIGCONT. v1.0.4 audit fix.
+    // App-level transaction boundary first: --quiesce-cmd lets the
+    // agent finish its in-flight transactions before we walk the fs.
+    // RAII guard so --resume-cmd always runs even if capture errors.
+    let _quiesce_guard = QuiesceGuard::run(args.quiesce_cmd.as_deref(), args.resume_cmd.clone())?;
+
+    // For real cross-file atomicity at the OS level (APFS clone alone
+    // isn't enough — the agent could still be mid-write between two
+    // files when the clone fires), pass `--pause-pid <pid>`: we
+    // SIGSTOP the agent, run the capture, then SIGCONT. Best paired
+    // with --quiesce-cmd above so the pause lands on a transaction
+    // boundary, not in the middle of one.
     #[cfg(unix)]
     let _pause_guard = match args.pause_pid {
         Some(pid) => Some(PauseGuard::stop(pid)?),
@@ -340,5 +372,50 @@ impl Drop for PauseGuard {
                 self.pid
             );
         }
+    }
+}
+
+/// RAII guard that runs `quiesce_cmd` on construction and
+/// `resume_cmd` on Drop. Either side may be `None` (no-op). Always
+/// runs the resume side — even if the body errors mid-capture — so
+/// the agent never gets stuck in a quiesced state.
+///
+/// v1.0.5 audit fix for the "SIGSTOP doesn't bracket app-level
+/// transactions" finding.
+struct QuiesceGuard {
+    resume_cmd: Option<String>,
+}
+
+impl QuiesceGuard {
+    fn run(quiesce: Option<&str>, resume: Option<String>) -> anyhow::Result<Self> {
+        if let Some(cmd) = quiesce {
+            run_shell(cmd)
+                .map_err(|e| CliError::BadInput(format!("--quiesce-cmd {cmd:?} failed: {e}")))?;
+        }
+        Ok(Self { resume_cmd: resume })
+    }
+}
+
+impl Drop for QuiesceGuard {
+    fn drop(&mut self) {
+        if let Some(cmd) = self.resume_cmd.take()
+            && let Err(e) = run_shell(&cmd)
+        {
+            eprintln!("warning: --resume-cmd failed: {e} — agent may stay quiesced");
+        }
+    }
+}
+
+/// Execute a shell-style command via `sh -c`. Returns Ok(()) on
+/// exit code 0; otherwise an error containing the exit status
+/// and (if any) the captured stderr.
+fn run_shell(cmd: &str) -> anyhow::Result<()> {
+    use std::process::Command;
+    let out = Command::new("sh").arg("-c").arg(cmd).output()?;
+    if out.status.success() {
+        Ok(())
+    } else {
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        anyhow::bail!("exit {}: {}", out.status, stderr.trim())
     }
 }

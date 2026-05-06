@@ -366,6 +366,46 @@ fn snapshot_with_missing_trace_path_fails_fast() {
         .stderr(contains("does not exist"));
 }
 
+/// v1.0.5 audit: --quiesce-cmd runs before fs walk, --resume-cmd
+/// runs on Drop. Both must execute even if the snapshot path errors.
+/// We verify by having each command touch a sentinel file.
+#[test]
+fn snapshot_runs_quiesce_and_resume_commands() {
+    let store = TempDir::new().unwrap();
+    let sandbox = TempDir::new().unwrap();
+    make_sandbox(sandbox.path());
+    let scratch = TempDir::new().unwrap();
+    let q = scratch.path().join("quiesce.touch");
+    let r = scratch.path().join("resume.touch");
+    pf(store.path())
+        .args(["snapshot", "--agent-id", "t", "--fs-root"])
+        .arg(sandbox.path())
+        .args(["--quiesce-cmd"])
+        .arg(format!("touch {}", q.display()))
+        .args(["--resume-cmd"])
+        .arg(format!("touch {}", r.display()))
+        .assert()
+        .success();
+    assert!(q.exists(), "--quiesce-cmd should have run");
+    assert!(r.exists(), "--resume-cmd should have run on Drop");
+}
+
+/// v1.0.5: a failing --quiesce-cmd should fail the snapshot fast
+/// (the operator's app didn't successfully enter quiescence).
+#[test]
+fn snapshot_failing_quiesce_cmd_aborts_snapshot() {
+    let store = TempDir::new().unwrap();
+    let sandbox = TempDir::new().unwrap();
+    make_sandbox(sandbox.path());
+    pf(store.path())
+        .args(["snapshot", "--agent-id", "t", "--fs-root"])
+        .arg(sandbox.path())
+        .args(["--quiesce-cmd", "exit 7"])
+        .assert()
+        .failure()
+        .stderr(contains("--quiesce-cmd"));
+}
+
 /// v1.0.4 audit (round 2): --trace-from-jsonl validated path
 /// existence + is_file but accepted invalid JSON content. Now we
 /// parse each non-empty line as `{"role": str, "content": str}` and

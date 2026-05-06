@@ -4,6 +4,56 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.0.5] — 2026-05-06
+
+Closes 4 follow-up findings from the v1.0.4 audit (round 3).
+
+### npm package fix (was a hard install blocker)
+
+- `@processfork/sdk@1.0.5` published a tarball with **no native
+  binary**, so `import` failed on every consumer. Root cause: the
+  CI publish-npm step staged `.node` files into `crates/pf-ts/binaries/`,
+  but the package's `files` glob is `*.node` (root only) so the
+  binaries got stripped at pack time.
+- Fix: stage to `crates/pf-ts/` root + new `npm pack --dry-run` gate
+  that fails the publish if no `.node` matches.
+- v1.0.6 of `@processfork/sdk` is the first npm release that
+  actually loads on consumer machines.
+
+### Correctness
+
+- **OpenInterpreter result_hash**. v1.0.4 persisted ledger entries
+  but the OI recorder dropped `result` on the floor, so
+  `result_hash` was hashing the empty string. Fixed: `run()` now
+  captures the wrapped `computer.run(...)` return value (truncated
+  to 8 KiB) and the snapshot path hashes it.
+- **`--quiesce-cmd` / `--resume-cmd`** for app-level transactional
+  consistency. `--pause-pid` SIGSTOPs at the OS scheduler but can
+  freeze a process mid-transaction; the new flags let the operator
+  signal the agent (e.g. `curl -XPOST /admin/quiesce`) to enter a
+  consistent state before the fs walk. RAII guard so `--resume-cmd`
+  always runs — even if capture errors mid-flight. 2 regression
+  tests (success + failing-quiesce-aborts).
+
+### Type stubs
+
+- `_pf_py.pyi`: added the `effects` parameter to `snapshot_filesystem`
+  (was added at runtime in v1.0.3 but the stub didn't reflect it,
+  so typed Python users got wrong editor feedback). Also added the
+  `read_blob` stub and a `_EffectEntry` TypedDict for the ledger
+  shape.
+
+### Versions
+
+- `processfork` (Rust + Python wheel): 1.0.4 → **1.0.5**
+- `processfork-openinterpreter`: 1.0.1 → **1.0.2** (result_hash fix)
+- `@processfork/sdk` (npm): 1.0.5 → **1.0.6** (first installable release)
+- 8 Rust crates on crates.io: all → **1.0.5**
+
+### Test count
+
+194 → 196 cargo tests workspace-wide (+2 quiesce-cmd regressions).
+
 ## [1.0.4] — 2026-05-06
 
 Closes 4 follow-up findings from the v1.0.3 audit (round 2).
