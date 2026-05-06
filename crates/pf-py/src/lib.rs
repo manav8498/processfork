@@ -131,6 +131,18 @@ pub fn digest_of(bytes: Vec<u8>) -> String {
 
 // ----------------------- snapshot_filesystem -----------------------
 
+/// Built-in default env-var scrub regex. Mirrors the CLI's
+/// `DEFAULT_SCRUB_REGEX` in `crates/pf-cli/src/commands/snapshot.rs`.
+/// Applied to caller-supplied env unless `default_scrub_env=False`.
+///
+/// v1.0.9 audit fix: prior versions of the SDK stored the supplied env
+/// dict verbatim, so adapters that called
+/// `pf.snapshot_filesystem(..., env=dict(os.environ))` (every adapter
+/// in `adapters/`) leaked `OPENAI_API_KEY`/`GITHUB_TOKEN`/etc. into the
+/// blob even when the CLI path was already redacting them.
+const DEFAULT_ENV_SCRUB: &str =
+    r"(?i)(?:^|_)(token|secret|password|passwd|pwd|api_?key|apikey|auth|bearer)(?:_|$)";
+
 /// Capture a filesystem sandbox + env + chat trace into a `.pfimg`-style
 /// manifest. Returns the manifest CID (`sha256:...`).
 ///
@@ -144,8 +156,25 @@ pub fn digest_of(bytes: Vec<u8>) -> String {
 /// Adapters maintain this list as the agent runs; passing it here
 /// folds it into the world image so restored agents see prior side
 /// effects as facts (ACRFence — "won't double-send your email").
+///
+/// `default_scrub_env` (default `True`) applies the built-in
+/// secret-shaped-name regex to `env` before storing. Adapters that
+/// pass `dict(os.environ)` get safe-by-default redaction without
+/// every caller having to remember it. Operators who want the full
+/// env in the snapshot pass `default_scrub_env=False`.
+///
+/// `scrub_env` is an optional list of additional regex patterns; any
+/// env-var name matching either the default or a custom pattern is
+/// replaced with `"<redacted>"`.
 #[pyfunction]
-#[pyo3(signature = (store, agent_kind, fs_root, env, messages, effects = None))]
+#[pyo3(signature = (
+    store, agent_kind, fs_root, env, messages,
+    effects = None, default_scrub_env = true, scrub_env = None,
+))]
+// pyo3 binding shims map a Python kwargs surface 1:1 onto positional
+// Rust arguments; splitting into a builder would obscure the
+// signature without changing the FFI layout.
+#[allow(clippy::too_many_arguments)]
 pub fn snapshot_filesystem(
     store: &PyPfStore,
     agent_kind: String,
@@ -153,6 +182,8 @@ pub fn snapshot_filesystem(
     env: Bound<'_, PyDict>,
     messages: Bound<'_, PyList>,
     effects: Option<Bound<'_, PyList>>,
+    default_scrub_env: bool,
+    scrub_env: Option<Vec<String>>,
 ) -> PyResult<String> {
     let blobs: Arc<dyn BlobStore> = store.inner.blobs_arc();
 
@@ -161,12 +192,30 @@ pub fn snapshot_filesystem(
     let walker = pf_world::WalkFsCapture::new(&fs_root);
     let fs_digest = walker.capture(&blobs).map_err(map_err)?;
 
-    // Env: convert PyDict → BTreeMap → EnvSnapshot blob.
+    // Env: convert PyDict → BTreeMap → EnvSnapshot blob, applying the
+    // default + caller-supplied scrub regexes so secret-shaped names
+    // never reach the blob unredacted.
+    let mut scrubs: Vec<regex::Regex> = Vec::new();
+    if default_scrub_env {
+        scrubs.push(
+            regex::Regex::new(DEFAULT_ENV_SCRUB)
+                .expect("compiled-in default env scrub regex must parse"),
+        );
+    }
+    if let Some(extras) = scrub_env {
+        for pat in extras {
+            scrubs.push(
+                regex::Regex::new(&pat)
+                    .map_err(|e| PyValueError::new_err(format!("scrub_env regex {pat:?}: {e}")))?,
+            );
+        }
+    }
     let mut env_map = std::collections::BTreeMap::new();
     for (k, v) in env.iter() {
         let key: String = k.extract()?;
         let val: String = v.extract()?;
-        env_map.insert(key, val);
+        let redacted = scrubs.iter().any(|re| re.is_match(&key));
+        env_map.insert(key, if redacted { "<redacted>".into() } else { val });
     }
     let env_blob = serde_json::json!({
         "kind": "env.v1",
@@ -214,48 +263,121 @@ pub fn snapshot_filesystem(
     }
     let trace_digest = blobs.put(&trace_bytes).map_err(map_err)?;
 
-    // Effects ledger: fold the supplied entries into a v1 ledger blob.
-    // Adapters that don't pass `effects` get the same empty header as
-    // before, but at least the surface to fix the ACRFence claim is
-    // wired end-to-end now.
+    // Effects ledger.
+    //
+    // v1.0.9 audit fix: prior versions of the SDK wrote raw JSONL
+    // with `session_hmac = ""` so tamper / reorder / delete on the
+    // on-disk blob was undetectable, even though the CLI path had
+    // been hardened in v1.0.7. Now mirror the CLI: route every entry
+    // through `pf_effects::ledger::Ledger::append`, which computes
+    // `session_hmac = HMAC(secret, prev_hash || this_hash)`.
+    //
+    // Session secret comes from `PF_SESSION_SECRET` env var if
+    // present (operator-supplied — preferred for real ACRFence), or
+    // is freshly generated per snapshot. When generated here we
+    // embed the hex into the blob header so `pf verify` can perform
+    // tamper detection without an out-of-band secret. This is
+    // "tamper-detection mode" — see CLI snapshot.rs for the same
+    // reasoning.
     let ledger_digest = {
-        let mut entries: Vec<serde_json::Value> = Vec::new();
+        use pf_effects::ledger::{Ledger, SessionSecret, SideEffectClass};
+
+        let (secret_bytes, embed_in_blob) = if let Ok(hex_str) = std::env::var("PF_SESSION_SECRET")
+        {
+            (
+                hex::decode(hex_str.trim())
+                    .map_err(|e| PyValueError::new_err(format!("PF_SESSION_SECRET hex: {e}")))?,
+                false,
+            )
+        } else {
+            use ring::rand::SecureRandom;
+            let mut buf = [0u8; 32];
+            ring::rand::SystemRandom::new()
+                .fill(&mut buf)
+                .map_err(|_| PyRuntimeError::new_err("session-secret RNG failed"))?;
+            (buf.to_vec(), true)
+        };
+        let secret_hex = hex::encode(&secret_bytes);
+        let secret = SessionSecret::new(secret_bytes);
+
+        let mut ledger = Ledger::new(secret);
         if let Some(list) = effects {
             for item in list.iter() {
                 let d: Bound<'_, PyDict> = item.downcast_into()?;
-                let mut obj = serde_json::Map::new();
-                for (k, v) in d.iter() {
-                    let key: String = k.extract()?;
-                    // Best-effort coerce common scalar shapes; fall
-                    // back to a String repr for anything weird.
-                    let val: serde_json::Value = if let Ok(s) = v.extract::<String>() {
-                        serde_json::Value::String(s)
-                    } else if let Ok(n) = v.extract::<i64>() {
-                        serde_json::Value::Number(n.into())
-                    } else if let Ok(b) = v.extract::<bool>() {
-                        serde_json::Value::Bool(b)
-                    } else {
-                        serde_json::Value::String(v.str()?.to_string())
-                    };
-                    obj.insert(key, val);
-                }
-                entries.push(serde_json::Value::Object(obj));
+
+                let get_str = |key: &str| -> PyResult<Option<String>> {
+                    Ok(match d.get_item(key)? {
+                        Some(v) => Some(v.extract::<String>()?),
+                        None => None,
+                    })
+                };
+                let tool_id = get_str("tool_id")?
+                    .ok_or_else(|| PyValueError::new_err("effects entry missing 'tool_id'"))?;
+                let args_hash_str = get_str("args_hash")?.unwrap_or_default();
+                let result_hash_str = get_str("result_hash")?.unwrap_or_else(|| {
+                    "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                        .to_owned()
+                });
+                let idempotency_key = get_str("idempotency_key")?.unwrap_or_default();
+                let class_str =
+                    get_str("side_effect_class")?.unwrap_or_else(|| "irreversible".into());
+                let side_effect_class = match class_str.as_str() {
+                    "pure" => SideEffectClass::Pure,
+                    "idempotent" => SideEffectClass::Idempotent,
+                    "network-only" => SideEffectClass::NetworkOnly,
+                    _ => SideEffectClass::Irreversible,
+                };
+                let args_hash =
+                    Digest256::parse(&args_hash_str).unwrap_or_else(|_| Digest256::of(&[]));
+                let result_hash =
+                    Digest256::parse(&result_hash_str).unwrap_or_else(|_| Digest256::of(&[]));
+                let timestamp = get_str("ts")?
+                    .or(get_str("timestamp")?)
+                    .and_then(|s| chrono::DateTime::parse_from_rfc3339(&s).ok())
+                    .map_or_else(chrono::Utc::now, |dt| dt.with_timezone(&chrono::Utc));
+
+                ledger
+                    .append(
+                        timestamp,
+                        &tool_id,
+                        args_hash,
+                        idempotency_key,
+                        result_hash,
+                        side_effect_class,
+                    )
+                    .map_err(|e| PyValueError::new_err(format!("ledger append: {e}")))?;
             }
         }
-        let mut body = format!(
-            "{{\"kind\":\"effects.ledger.v1\",\"entries\":{}}}\n",
-            entries.len()
-        )
-        .into_bytes();
-        for e in entries {
-            body.extend_from_slice(
-                serde_json::to_string(&e)
-                    .map_err(|e| PyValueError::new_err(format!("ledger serialize: {e}")))?
-                    .as_bytes(),
-            );
-            body.push(b'\n');
+
+        let raw_digest = ledger.serialize(blobs.as_ref()).map_err(map_err)?;
+        if embed_in_blob {
+            // Replace the header line with an extended one that
+            // carries `session_secret_hex` so `pf verify` can run
+            // without an out-of-band secret. Body stays untouched.
+            let raw_bytes = blobs.get(&raw_digest).map_err(map_err)?;
+            let mut split = raw_bytes.splitn(2, |b| *b == b'\n');
+            let header_bytes = split.next().unwrap_or(&[]);
+            let body_bytes = split.next().unwrap_or(&[]);
+            let mut header: serde_json::Value = serde_json::from_slice(header_bytes)
+                .map_err(|e| PyValueError::new_err(format!("ledger header: {e}")))?;
+            if let Some(obj) = header.as_object_mut() {
+                obj.insert(
+                    "session_secret_hex".to_owned(),
+                    serde_json::Value::String(secret_hex),
+                );
+                obj.insert(
+                    "verification_mode".to_owned(),
+                    serde_json::Value::String("tamper-detection".into()),
+                );
+            }
+            let mut new_blob = serde_json::to_vec(&header)
+                .map_err(|e| PyValueError::new_err(format!("ledger header re-encode: {e}")))?;
+            new_blob.push(b'\n');
+            new_blob.extend_from_slice(body_bytes);
+            blobs.put(&new_blob).map_err(map_err)?
+        } else {
+            raw_digest
         }
-        blobs.put(&body).map_err(map_err)?
     };
 
     // Model: empty Lora delta envelope (sufficient for v1; SDK users

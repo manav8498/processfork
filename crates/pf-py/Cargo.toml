@@ -30,3 +30,9 @@ pf-model   = { workspace = true }
 pyo3       = { workspace = true }
 serde_json = { workspace = true }
 chrono     = { workspace = true }
+# v1.0.9 audit fix (env scrub + HMAC-chained ledger in the SDK):
+# regex = default-scrub regex; hex/ring = session-secret material that
+# matches the CLI's tamper-detection-mode header.
+regex      = "1.10"
+hex        = { workspace = true }
+ring       = { workspace = true }

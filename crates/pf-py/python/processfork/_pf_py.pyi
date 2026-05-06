@@ -66,13 +66,34 @@ def snapshot_filesystem(
     env: Mapping[str, str],
     messages: Sequence[_Message],
     effects: Sequence[_EffectEntry] | None = None,
+    default_scrub_env: bool = True,
+    scrub_env: Sequence[str] | None = None,
 ) -> str:
     """Capture FS sandbox + env + chat trace into a `.pfimg`. Returns CID.
 
     ``effects`` (optional) folds tool-call ledger entries into the
-    ``effects.ledger.v1`` blob so a restored agent sees prior side
-    effects as facts (ACRFence). Adapters maintain this list as the
-    agent runs; empty/None gives a header-only ledger.
+    HMAC-chained ``effects.ledger.v1`` blob (v1.0.9: SDK now routes
+    through ``pf_effects::Ledger::append`` and embeds a
+    ``session_secret_hex`` so ``pf verify`` validates the chain — the
+    same path the CLI takes). Adapters maintain this list as the agent
+    runs; empty/None gives a header-only ledger.
+
+    ``default_scrub_env`` (default ``True``, v1.0.9) applies a built-in
+    secret-shaped-name regex to ``env`` before storing —
+    ``OPENAI_API_KEY``, ``GITHUB_TOKEN``, ``*_SECRET``, ``*_PASSWORD``,
+    ``*_KEY``, etc. become ``"<redacted>"``. Adapters that pass
+    ``dict(os.environ)`` get safe-by-default redaction without every
+    caller having to remember it. Set ``False`` only when you genuinely
+    need the raw env in the snapshot (rare; CI debugging at most).
+
+    ``scrub_env`` is an optional list of additional regex patterns;
+    each env-var name matching either the default or a custom pattern
+    is replaced with ``"<redacted>"``.
+
+    Pass ``PF_SESSION_SECRET=<hex>`` in the environment to use a real
+    out-of-band session secret (real ACRFence). Without it the SDK
+    generates a fresh per-snapshot secret and embeds the hex in the
+    blob header for tamper-detection mode.
     """
     ...
 
