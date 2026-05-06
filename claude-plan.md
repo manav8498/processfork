@@ -8,114 +8,67 @@
 
 ## Where I am right now
 
-**10 of 12 phases complete and tagged. 164 tests pass (154 Rust + 5 Python +
-5 TypeScript). Lints clean. Workspace is at HEAD = `phase-9-complete`.**
+**v1.0.0 + v1.0.1 fully shipped.** All 12 build phases complete; 200+ tests
+pass; live across 4 registries:
 
-| Phase | Name              | Status | Tag                | Tests   |
-|-------|-------------------|--------|--------------------|---------|
-| 0     | bootstrap         | ✅ done | phase-0-complete  | —       |
-| 1     | core_engine_rust  | ✅ done | phase-1-complete  | 16      |
-| 2     | world_layer       | ✅ done | phase-2-complete  | 12      |
-| 3     | effects_layer     | ✅ done | phase-3-complete  | 18      |
-| 4     | cache_layer       | ✅ done | phase-4-complete  | 21      |
-| 5     | model_layer       | ✅ done | phase-5-complete  | 24      |
-| 6     | merge_engine      | ✅ done | phase-6-complete  | 31      |
-| 7     | sdks              | ✅ done | phase-7-complete  | 5+5     |
-| 8     | cli               | ✅ done | phase-8-complete  | 12      |
-| 9     | registry          | ✅ done | phase-9-complete  | 20      |
-| 10    | integrations      | ▶ next | —                  | —       |
-| 11–12 | …                 | ⏳ pend | —                  | —       |
+| Surface | What's live |
+|---------|-------------|
+| **PyPI `processfork`** | 1.0.1 × 5 platform wheels (macOS arm + macOS x86 + Linux x86_64 manylinux_2_28 + Linux aarch64 manylinux_2_28 + Windows x86_64) — published via OIDC Trusted Publishing |
+| **PyPI 7 adapters**    | `processfork-{claude-code,langgraph,openinterpreter,vllm,sglang,autogen,crewai}` — all OIDC; vllm at 1.0.1, others at 1.0.0 |
+| **crates.io**          | 8 crates @ 1.0.1: `processfork`, `pf-core`, `pf-model`, `pf-cache`, `pf-world`, `pf-effects`, `pf-merge`, `pf-registry` |
+| **npm**                | `@processfork/sdk@1.0.2` (1.0.0/1.0.1 broken, fixed in 1.0.2) |
+| **GHCR**               | `ghcr.io/manav8498/processfork:1.0.1` and `:latest` |
+| **GitHub Releases**    | `v1.0.0`, `v1.0.1` — wheels + 3-arch `pf` binaries + cosign sigs |
 
-End-to-end registry round-trip works on the build host:
-- `pf snapshot` in store A → `pf push file://...` to a registry dir →
-  `pf pull file://...` into store B → CID is identical.
-- `pf clone file://... --into PATH` does pull + restore in one step.
-- Tampered manifests / blobs caught on pull (signature + re-hash).
+Last green pipeline: https://github.com/manav8498/processfork/actions/runs/25411004140 (23/23).
 
-## What's next (top of stack — Phase 10: integrations)
+## What's NOT done (intentional or deferred)
 
-Phase 10 is the **seven first-party integration adapters** per
-`agent_docs/feature-spec.md` M5. Each adapter wraps an existing
-agent-runtime so it can snapshot / fork / merge through ProcessFork.
+These are explicitly out of scope per CLAUDE.md `## Out of scope`:
+- Hosted SaaS / web dashboard
+- Native Windows runtime (we ship a Windows wheel of the SDK; the runtime
+  itself is Linux/macOS only)
+- Distributed multi-host fork
+- Custom inference engine
+- Custom model-merge algorithm
+- Telemetry of any kind
 
-The full v1 list:
-1. Claude Code wrapper (`pf wrap claude` slash-commands).
-2. LangGraph checkpointer.
-3. OpenInterpreter wrapper.
-4. vLLM native server plugin (paged-KV cache via Phase-4 format).
-5. SGLang native server plugin (RadixAttention via Phase-4 format).
-6. AutoGen runtime adapter.
-7. CrewAI memory adapter.
+## Open follow-ups (none blocking; all opt-in for the operator)
 
-For one session, realistic scope:
-- Lay down the seven crate skeletons under `adapters/`.
-- Ship 2–3 adapters end-to-end; scaffold the rest with API surface +
-  README + GPU-/network-gated test placeholders.
-- Each adapter's spec lives in `agent_docs/integration-<name>.md`.
+1. **Revoke leaked API tokens** that went through chat during v1.0.1 ship —
+   PyPI (no longer needed at all thanks to OIDC), crates.io (replace with the
+   90-day `processfork-release-ci` token already in repo secrets), npm (same).
+   Operator action only.
+2. **GPU-host bit-exact round-trip** against real Llama-3-8B vLLM — the
+   wiring ships in `adapters/pf-vllm/processfork_vllm/plugin.py` and the
+   test in `tests/test_vllm_smoke.py::test_live_vllm_bit_exact_replay` skips
+   without `$PF_HAS_GPU=1`. Operator runs this on a CUDA box to flip the
+   v1.0.1 status from "shipped (mock parity)" to "shipped (bit-exact)".
+3. **Node.js 20 actions deprecation** (June 2026) — the workflow uses
+   `actions/{checkout,setup-python,upload-artifact,download-artifact}@v4`
+   plus `softprops/action-gh-release@v2`. All run on Node.js 20. Bump to
+   the @v5 / @v6 lines whenever they land (pure mechanical follow).
+4. **pyo3 0.24+** — current 0.22.6 has RUSTSEC-2025-0020 ignored in
+   `deny.toml` because we don't call the affected fn. Bumping to 0.24
+   needs the `Bound`-API #[pymodule] signature rewrite (~30 min). Not
+   urgent; tracked in assumption A-007.
 
-**Recommended order**:
-1. **Claude Code** — pure-Python wrapper around the SDK; no model
-   server needed; testable on the build host.
-2. **LangGraph** — Python adapter implementing the
-   `langgraph.checkpoint.BaseCheckpointSaver` interface; heavy dep but
-   testable with a tiny synthetic graph.
-3. **OpenInterpreter** — pure-Python; should follow Claude Code's
-   pattern.
-4. **vLLM**, **SGLang**, **AutoGen**, **CrewAI** — need real model
-   servers / multi-agent runtimes; ship API + integration test
-   skeletons gated by `$PF_HAS_GPU=1` (vLLM/SGLang) or just deps
-   present (AutoGen/CrewAI).
+## How to do a v1.0.2 / vN.M.K release
 
-## Blockers
+The pipeline is now zero-touch given fresh tokens:
 
-- **None for the recommended scope** above. Real Llama-3-8B integration
-  for vLLM/SGLang requires a CUDA host and is gated by `$PF_HAS_GPU=1`.
+```bash
+# 1. bump versions
+#    Cargo.toml workspace.package.version
+#    Cargo.toml workspace.dependencies pf-* version =
+#    crates/pf-py/pyproject.toml [project] version
+#    crates/pf-ts/package.json version
+#    adapters/pf-<name>/pyproject.toml version (only if that adapter changed)
+# 2. update CHANGELOG.md with a new ## [X.Y.Z] section
+# 3. commit, then:
+git tag vX.Y.Z && git push origin vX.Y.Z
+```
 
-## Recently completed (this session)
-
-- Phase 8 (CLI): refactored main.rs into commands/ tree; wired 10
-  subcommands; stubbed 3 to Phase 9; 11 assert_cmd integ tests;
-  examples/02-cli-snapshot/run.sh.
-- Phase 9 (registry): ImageRef parser for 5 schemes; Registry trait;
-  FileRegistry full impl with sign+verify; HF/S3/IPFS scaffolded;
-  transitive blob walker; CLI push/pull/clone wired end-to-end;
-  20 tests in pf-registry.
-
-## Files most likely to need editing in the next session
-
-- `adapters/pf-claude-code/` (new) — pure-Python wrapper around the
-  Python SDK + a hook script for Claude Code's PreToolUse / PostToolUse.
-- `adapters/pf-langgraph/` (new) — Python pkg.
-- `adapters/pf-openinterpreter/` (new).
-- `adapters/pf-{vllm,sglang,autogen,crewai}/` — API surface + README.
-- `examples/03-claude-code-fork/`, `examples/04-langgraph-checkpoint/`,
-  etc. (one per shipped adapter).
-- `claude-progress.json` — flip phase 10 to done when gate passes.
-
-## Operator-only deliverables (cannot run from build agent)
-
-These remain blocked on operator action, not on code:
-- `pip install processfork` end-to-end smoke from PyPI (needs
-  `PYPI_API_TOKEN`). The wheel itself builds and installs locally.
-- `npm install @processfork/sdk` end-to-end smoke from npm (needs
-  `NPM_TOKEN`). The .node binary builds and runs locally.
-- `cargo install processfork` from crates.io (needs `CARGO_REGISTRY_TOKEN`).
-- 60-second asciinema demo recording (script lives under `demo/` once it's
-  written in Phase 12; recording is operator-produced).
-- Real-hardware bit-exact replay test (needs CUDA host + Llama-3-8B served by
-  vLLM ≥0.10 in deterministic mode; gated behind `$PF_HAS_GPU=1`).
-- mergekit-equivalence test (needs Llama-3-8B base weights + Python
-  `mergekit` install; gated behind `$PF_HAS_GPU=1`).
-- Live summarizer call for trace-merge (needs Anthropic API key; gated
-  behind the `live-summarizer` feature flag).
-- Live HF Hub push/pull (needs `HF_TOKEN`; gated `--features hf-live`).
-- Live S3 push/pull (needs AWS creds; gated `--features s3-live`).
-- Live IPFS push/pull (needs local IPFS daemon; gated
-  `--features ipfs-live`).
-
-## Context-window discipline reminders
-
-- 60 % → write a one-paragraph progress note here.
-- 70 % → commit WIP behind a feature flag if needed; consider compact.
-- 85 % → finish the current logical unit; stop adding new work; leave clean
-  state files for the next session.
+The Release workflow (`.github/workflows/release.yml`) does the rest. PyPI
+is OIDC; only `CARGO_REGISTRY_TOKEN` and `NPM_TOKEN` repo secrets are
+needed, and both are valid 90 days from 2026-05-05.
