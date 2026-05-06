@@ -51,12 +51,41 @@ def test_endpoints_register_all_four_paths() -> None:
     }
 
 
-def test_snapshot_handler_no_engine_returns_clear_message() -> None:
-    """Without engine + PF_HAS_GPU, snapshot points to the README."""
-    eps = build_endpoints(SglangCachePager())
+def test_snapshot_handler_mock_mode_persists_into_temp_store(tmp_path) -> None:
+    """v1.0.7: snapshot persists in mock mode too — pager._pages is
+    the source-of-truth, store is the destination."""
+    pytest.importorskip("processfork")
+    eps = build_endpoints(SglangCachePager(), store_path=str(tmp_path / "store"))
     out = eps["/processfork/snapshot"]()
-    assert out["ok"] is False
-    assert "PF_HAS_GPU" in out["error"]
+    assert out["ok"] is True
+    assert out["cid"].startswith("sha256:")
+    assert out["n_pages"] == 0
+
+
+def test_snapshot_persists_pages_and_checkout_restores_them(tmp_path) -> None:
+    """v1.0.7 audit: snapshot/checkout actually persist + restore
+    the K/V page bytes via the SDK store. Mirrors the vLLM adapter
+    test."""
+    pytest.importorskip("processfork")
+    pager_a = SglangCachePager(n_layers=2)
+    pager_a.write_page(0, b"k0" * 32, b"v0" * 32)
+    pager_a.write_page(5, b"k5" * 32, b"v5" * 32)
+
+    store_path = str(tmp_path / "store")
+    eps_a = build_endpoints(pager_a, store_path=store_path)
+    snap = eps_a["/processfork/snapshot"](name="persistence-test")
+    assert snap["ok"], snap
+    cid = snap["cid"]
+    assert snap["n_pages"] == 2
+
+    pager_b = SglangCachePager(n_layers=2)
+    eps_b = build_endpoints(pager_b, store_path=store_path)
+    chk = eps_b["/processfork/checkout"](cid)
+    assert chk["ok"], chk
+    assert chk["n_pages"] == 2
+
+    assert pager_a.read_page(0) == pager_b.read_page(0)
+    assert pager_a.read_page(5) == pager_b.read_page(5)
 
 
 def test_plugin_exposes_endpoints() -> None:

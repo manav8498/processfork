@@ -250,26 +250,36 @@ def build_endpoints(
 ) -> dict[str, Callable[..., Any]]:
     """Build the four HTTP handlers as plain callables.
 
-    In mock mode (no engine or no PF_HAS_GPU) returns
-    ``{"ok": false, "error": ...}`` pointing at the README. In live
-    mode drives the pager methods and returns CIDs / acks.
+    v1.0.7 audit fix: live-mode snapshot/checkout now actually
+    persist K/V page bytes + manifest to a real ProcessFork store
+    (mirrors the vLLM adapter). v1.0.6-and-prior returned CIDs that
+    pointed at no on-disk content.
     """
 
     def _live() -> bool:
         return pager.engine is not None and _gpu_enabled()
 
+    def _open_store() -> Any:
+        import processfork as pf
+
+        return pf.PfStore.open(store_path)
+
     def _snapshot(name: str | None = None) -> Mapping[str, Any]:
-        if not _live():
-            return {
-                "ok": False,
-                "error": "live SGLang snapshot requires an engine and "
-                "PF_HAS_GPU=1; see adapters/pf-sglang/README.md.",
-            }
+        # v1.0.7 audit fix: persistence runs in both mock and live
+        # modes (mock falls back to pager._pages). The `_live()`
+        # gate was a usability filter, not a correctness one.
+        import json
+
+        import processfork as pf
+
+        store = _open_store()
         pager.pause()
         try:
             pages = []
             for ix in pager.occupied_pages():
-                k_cid, v_cid = pager.page_digest(ix)
+                k_bytes, v_bytes = pager.read_page(ix)
+                k_cid = pf.put_blob(store, k_bytes)
+                v_cid = pf.put_blob(store, v_bytes)
                 pages.append({"ix": ix, "k": k_cid, "v": v_cid})
             manifest = {
                 "layout": "paged-batchinvariant-v1",
@@ -281,10 +291,10 @@ def build_endpoints(
                 "name": name,
                 "pages": pages,
             }
-            import json
-
-            blob = json.dumps(manifest, sort_keys=True, separators=(",", ":")).encode()
-            cid = "sha256:" + hashlib.sha256(blob).hexdigest()
+            manifest_bytes = json.dumps(
+                manifest, sort_keys=True, separators=(",", ":")
+            ).encode()
+            cid = pf.put_blob(store, manifest_bytes)
             return {"ok": True, "cid": cid, "n_pages": len(pages)}
         finally:
             pager.resume()
@@ -295,11 +305,28 @@ def build_endpoints(
         return {"ok": True, "cid": cid, "n": n}
 
     def _checkout(cid: str) -> Mapping[str, Any]:
-        if not _live():
-            return {"ok": False, "error": "see /processfork/snapshot"}
+        # v1.0.7 audit fix: load manifest + pages from store and
+        # write them back via pager.write_page (mock or live).
+        import json
+
+        import processfork as pf
+
+        store = _open_store()
         pager.pause()
         try:
-            return {"ok": True, "cid": cid}
+            try:
+                manifest_bytes = pf.read_blob(store, cid)
+            except Exception as e:
+                return {"ok": False, "error": f"manifest {cid} not in store: {e}"}
+            manifest = json.loads(manifest_bytes.decode("utf-8"))
+            n_loaded = 0
+            for entry in manifest.get("pages", []):
+                ix = entry["ix"]
+                k_bytes = pf.read_blob(store, entry["k"])
+                v_bytes = pf.read_blob(store, entry["v"])
+                pager.write_page(ix, bytes(k_bytes), bytes(v_bytes))
+                n_loaded += 1
+            return {"ok": True, "cid": cid, "n_pages": n_loaded}
         finally:
             pager.resume()
 

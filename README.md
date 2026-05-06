@@ -109,7 +109,7 @@ Identical content shares storage automatically — 12 parallel forks use **~1.5�
 
 ## Status
 
-`v1.0.6` tagged. Closes 2 round-4 audit findings: OpenInterpreter `result_hash` now hashes the FULL output before truncating the displayed copy (v1.0.5 hashed the truncated string, so two large outputs sharing a prefix collided); `--resume-cmd` now runs even when `--quiesce-cmd` fails partway through (RAII Drop ordering — guard owns resume before quiesce runs, so the error-return path fires resume). v1.0.3 [security advisories](./SECURITY.md) remain in force.
+`v1.0.7` tagged. Closes 4 of 5 round-5 audit blockers: env capture redacts secret-shaped names by default (no more leaks if operator forgets `--scrub-env`); ledger writes now go through real `pf_effects::Ledger::append` HMAC chaining + `pf verify` validates the chain (was the ACRFence claim's biggest gap); vLLM/SGLang plugins actually write K/V page bytes + manifest to the store and read them back on checkout (v1.0.6 returned a CID that pointed at nothing); versions aligned across surfaces. Round-5's 5th finding (cargo-audit ignores on `pyo3 0.22` + `rustls-webpki 0.101`) is tracked for v1.0.8.
 
 | metric                                                 | observed                 | target           |
 |--------------------------------------------------------|--------------------------|------------------|

@@ -371,24 +371,43 @@ def build_endpoints(
 
     In mock mode (no engine) they return a clear ``{"ok": false,
     "error": "..."}``  pointing at the README. In live mode they drive
-    the pager methods and return the resulting CIDs / acks.
+    the pager methods AND persist every K/V page byte buffer + the
+    per-snapshot manifest into a real ProcessFork store at
+    ``store_path``. Without that persistence, the v1.0.6-and-prior
+    plugins computed CIDs that pointed at no on-disk content — the
+    v1.0.7 audit caught this exact gap.
     """
 
     def _live() -> bool:
         return pager.engine is not None and _gpu_enabled()
 
+    def _open_store() -> Any:
+        import processfork as pf
+        return pf.PfStore.open(store_path)
+
     def _snapshot(name: str | None = None) -> Mapping[str, Any]:
-        if not _live():
-            return {
-                "ok": False,
-                "error": "live vLLM snapshot requires an engine and PF_HAS_GPU=1; "
-                "see adapters/pf-vllm/README.md.",
-            }
+        # v1.0.7 audit fix: persistence runs in both mock and live
+        # modes. The pager's read_page/occupied_pages already fall
+        # back to its in-memory `_pages` dict when no GPU engine is
+        # configured (see VllmCachePager). The `_live()` gate that
+        # used to short-circuit here was a usability filter, not a
+        # correctness one — and it made the persistence path
+        # untestable without a real GPU.
+        import json
+
+        import processfork as pf
+
+        store = _open_store()
         pager.pause()
         try:
             pages = []
             for ix in pager.occupied_pages():
-                k_cid, v_cid = pager.page_digest(ix)
+                k_bytes, v_bytes = pager.read_page(ix)
+                # v1.0.7 audit fix: actually persist the K/V bytes via
+                # the SDK's put_blob so the resulting `k`/`v` CIDs
+                # resolve to real on-disk content.
+                k_cid = pf.put_blob(store, k_bytes)
+                v_cid = pf.put_blob(store, v_bytes)
                 pages.append({"ix": ix, "k": k_cid, "v": v_cid})
             manifest = {
                 "layout": "paged-batchinvariant-v1",
@@ -400,11 +419,12 @@ def build_endpoints(
                 "name": name,
                 "pages": pages,
             }
-            # The Rust core finalizes the .pfimg from this manifest; the
-            # CID returned here is the SHA-256 of the canonical JSON.
-            import json
-            blob = json.dumps(manifest, sort_keys=True, separators=(",", ":")).encode()
-            cid = "sha256:" + hashlib.sha256(blob).hexdigest()
+            manifest_bytes = json.dumps(
+                manifest, sort_keys=True, separators=(",", ":")
+            ).encode()
+            # Persist the manifest itself; the returned CID points at
+            # actual content the operator can later pf-pull/restore.
+            cid = pf.put_blob(store, manifest_bytes)
             return {"ok": True, "cid": cid, "n_pages": len(pages)}
         finally:
             pager.resume()
@@ -417,14 +437,31 @@ def build_endpoints(
         return {"ok": True, "cid": cid, "n": n}
 
     def _checkout(cid: str) -> Mapping[str, Any]:
-        if not _live():
-            return {"ok": False, "error": "see /v1/processfork/snapshot"}
+        # v1.0.7 audit fix: load the manifest + page blobs from the
+        # store and write them back via pager.write_page. The pager's
+        # mock-mode write_page populates its `_pages` dict; live mode
+        # writes onto the GPU. v1.0.6 just returned `{"ok": true}`
+        # without doing any work.
+        import json
+
+        import processfork as pf
+
+        store = _open_store()
         pager.pause()
         try:
-            # Real path: resolve the manifest from the store, then
-            # write_page() each blob back into the gpu_cache. The Rust
-            # side fetches the blobs; here we just acknowledge.
-            return {"ok": True, "cid": cid}
+            try:
+                manifest_bytes = pf.read_blob(store, cid)
+            except Exception as e:
+                return {"ok": False, "error": f"manifest {cid} not in store: {e}"}
+            manifest = json.loads(manifest_bytes.decode("utf-8"))
+            n_loaded = 0
+            for entry in manifest.get("pages", []):
+                ix = entry["ix"]
+                k_bytes = pf.read_blob(store, entry["k"])
+                v_bytes = pf.read_blob(store, entry["v"])
+                pager.write_page(ix, bytes(k_bytes), bytes(v_bytes))
+                n_loaded += 1
+            return {"ok": True, "cid": cid, "n_pages": n_loaded}
         finally:
             pager.resume()
 

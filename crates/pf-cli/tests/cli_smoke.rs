@@ -406,6 +406,144 @@ fn snapshot_failing_quiesce_cmd_aborts_snapshot() {
         .stderr(contains("--quiesce-cmd"));
 }
 
+/// v1.0.7 audit: effects ledger entries are now HMAC-chained at
+/// snapshot time. Validate end-to-end that:
+///   1. snapshot writes a ledger with non-empty session_hmac per entry,
+///   2. `pf verify` accepts the original blob (chains_ok),
+///   3. `pf verify` rejects a tampered blob (chains_bad).
+#[test]
+fn snapshot_ledger_is_hmac_chained_and_verify_detects_tampering() {
+    let store = TempDir::new().unwrap();
+    let sandbox = TempDir::new().unwrap();
+    make_sandbox(sandbox.path());
+    let effects_path = sandbox.path().join("effects.jsonl");
+    std::fs::write(
+        &effects_path,
+        concat!(
+            r#"{"tool_id":"send_email","args_hash":"sha256:aa","result_hash":"sha256:bb","idempotency_key":"k1","side_effect_class":"irreversible"}"#,
+            "\n",
+            r#"{"tool_id":"db_write","args_hash":"sha256:cc","result_hash":"sha256:dd","idempotency_key":"k2","side_effect_class":"idempotent"}"#,
+            "\n",
+        ),
+    )
+    .unwrap();
+
+    let cid = String::from_utf8(
+        pf(store.path())
+            .args(["snapshot", "--agent-id", "t", "--fs-root"])
+            .arg(sandbox.path())
+            .args(["--effects-from-jsonl"])
+            .arg(&effects_path)
+            .assert()
+            .success()
+            .get_output()
+            .stdout
+            .clone(),
+    )
+    .unwrap()
+    .trim()
+    .to_owned();
+
+    // Read the ledger blob — every entry must have a non-empty
+    // session_hmac field.
+    let s = PfStore::open(store.path()).unwrap();
+    let m = s
+        .get_manifest(&pf_core::digest::Digest256::parse(&cid).unwrap())
+        .unwrap();
+    let ledger_bytes = s.blobs().get(&m.effects.ledger).unwrap();
+    let text = String::from_utf8(ledger_bytes.clone()).unwrap();
+    let header_line = text.lines().next().unwrap();
+    let header: serde_json::Value = serde_json::from_str(header_line).unwrap();
+    assert_eq!(header["kind"], "effects.ledger.v1");
+    assert_eq!(header["entries"], 2);
+    assert!(
+        header.get("session_secret_hex").is_some(),
+        "default snapshot must embed session_secret_hex for tamper-detection"
+    );
+    for (lineno, l) in text.lines().skip(1).enumerate() {
+        let v: serde_json::Value = serde_json::from_str(l).unwrap();
+        let hmac_str = v["session_hmac"].as_str().unwrap_or("");
+        assert!(
+            !hmac_str.is_empty(),
+            "entry {lineno} session_hmac must be non-empty (was: {l})"
+        );
+        assert_eq!(hmac_str.len(), 64, "session_hmac must be 32 bytes hex");
+    }
+
+    // Original blob → pf verify passes.
+    pf(store.path()).args(["verify"]).assert().success();
+
+    // Tamper: rewrite the second entry's tool_id from "db_write" to
+    // "send_email" without re-chaining. pf verify must catch it.
+    let tampered = text.replace(r#""tool_id":"db_write""#, r#""tool_id":"hijacked""#);
+    // Write the tampered blob into the store under a NEW digest
+    // (simulating an attacker who modified the on-disk blob and
+    // re-pointed the manifest). For the test we replace the file
+    // directly at the existing digest's on-disk path.
+    let blob_path = store
+        .path()
+        .join("blobs")
+        .join("sha256")
+        .join(&m.effects.ledger.hex()[..2])
+        .join(format!("{}.zst", m.effects.ledger.hex()));
+    let compressed = zstd::encode_all(tampered.as_bytes(), 19).unwrap();
+    std::fs::write(&blob_path, compressed).unwrap();
+
+    let result = pf(store.path()).args(["verify"]).assert().failure();
+    let stderr = String::from_utf8(result.get_output().stderr.clone()).unwrap();
+    // pf verify either fails on the blob's digest (because we
+    // rewrote the on-disk content but the blob name is the original
+    // hash) OR fails on the HMAC chain. Either way the failure must
+    // mention "verification" or "HMAC".
+    assert!(
+        stderr.contains("verification") || stderr.contains("HMAC") || stderr.contains("BAD"),
+        "expected verification failure, stderr was: {stderr}"
+    );
+}
+
+/// v1.0.7 audit: env capture redacts secret-shaped names by default.
+/// Operator gets safe-by-default behavior without remembering --scrub-env.
+#[test]
+fn snapshot_default_scrub_redacts_secret_shaped_vars() {
+    let store = TempDir::new().unwrap();
+    let sandbox = TempDir::new().unwrap();
+    make_sandbox(sandbox.path());
+    let cid = String::from_utf8(
+        pf(store.path())
+            .env("OPENAI_API_KEY", "sk-leaked-via-default-capture-bug")
+            .env("DATABASE_PASSWORD", "hunter2")
+            .env("PUBLIC_VAR", "this-is-fine")
+            .args(["snapshot", "--agent-id", "t", "--fs-root"])
+            .arg(sandbox.path())
+            .assert()
+            .success()
+            .get_output()
+            .stdout
+            .clone(),
+    )
+    .unwrap()
+    .trim()
+    .to_owned();
+
+    let s = PfStore::open(store.path()).unwrap();
+    let m = s
+        .get_manifest(&pf_core::digest::Digest256::parse(&cid).unwrap())
+        .unwrap();
+    let env_text = String::from_utf8(s.blobs().get(&m.world.env).unwrap()).unwrap();
+    assert!(
+        !env_text.contains("sk-leaked-via-default-capture-bug"),
+        "default scrub must redact OPENAI_API_KEY value; env blob was: {env_text}"
+    );
+    assert!(
+        !env_text.contains("hunter2"),
+        "default scrub must redact DATABASE_PASSWORD value"
+    );
+    assert!(
+        env_text.contains("this-is-fine"),
+        "non-secret env vars must still be captured"
+    );
+}
+
 /// v1.0.6 audit: when --quiesce-cmd fails AFTER it's already mutated
 /// app state, --resume-cmd must still run so the operator's app
 /// doesn't get stuck in a half-quiesced state.

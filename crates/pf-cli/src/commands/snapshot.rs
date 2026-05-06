@@ -13,6 +13,17 @@ use pf_core::store::PfStore;
 
 use super::CliError;
 
+/// Default env-var redaction regex applied unless `--no-default-scrub`
+/// is passed. Matches the obvious secret-shaped names (case-
+/// insensitive): `token`, `secret`, `password`, `passwd`, `pwd`,
+/// `api_?key`, `apikey`, `auth`, `bearer`, plus any var ending in
+/// `_TOKEN` / `_SECRET` / `_PASSWORD` / `_KEY`.
+///
+/// v1.0.7 audit fix for "secrets leak by default" — see
+/// `SECURITY.md` PF-SA-2026-002.
+const DEFAULT_SCRUB_REGEX: &str =
+    r"(?i)(?:^|_)(token|secret|password|passwd|pwd|api_?key|apikey|auth|bearer)(?:_|$)";
+
 #[derive(Debug, Parser)]
 pub struct Args {
     /// User-friendly identifier for the agent (`claude-code`, `langgraph`, …).
@@ -42,12 +53,26 @@ pub struct Args {
     #[arg(long)]
     pub effects_from_jsonl: Option<PathBuf>,
 
-    /// Regex of env-var names to redact from the captured environment.
-    /// Repeatable. Per spec §4.7 — without this every env var (including
-    /// secrets) lands in the world-layer env blob. Recommended baseline:
-    /// `--scrub-env '(?i)token|secret|password|key'`.
+    /// Additional regex(es) of env-var names to redact from the
+    /// captured environment. Repeatable.
+    ///
+    /// **A built-in default regex always runs unless you pass
+    /// `--no-default-scrub`** — it redacts the obvious secret-shaped
+    /// names (`token`, `secret`, `password`, `key`, `api_key`,
+    /// `auth`, `bearer`, plus `*_TOKEN` / `*_SECRET` / `*_PASSWORD`
+    /// / `*_KEY` suffixes, case-insensitive).
+    ///
+    /// v1.0.7 audit fix: prior versions captured every env var by
+    /// default, so a forgetful operator with `OPENAI_API_KEY` /
+    /// `GITHUB_TOKEN` / etc. in scope leaked them into the .pfimg.
     #[arg(long)]
     pub scrub_env: Vec<String>,
+
+    /// Disable the built-in default scrub regex. Use this if you
+    /// want full control over the redaction set (operator-supplied
+    /// `--scrub-env` patterns still apply).
+    #[arg(long)]
+    pub no_default_scrub: bool,
 
     /// Parent CIDs to record in `manifest.parents`. Set this when you're
     /// snapshotting after a `pf fork` so `pf merge` can find the common
@@ -167,6 +192,14 @@ pub fn run(store_root: &Path, args: Args) -> anyhow::Result<()> {
         .use_apfs_clone(cfg!(target_os = "macos"))
         .capture(&blobs)?;
     let mut env_capture = pf_world::EnvCapture::new();
+    // v1.0.7 audit fix: secret-shaped env vars are redacted by
+    // default. Operator can disable via --no-default-scrub if they
+    // need the full env in the snapshot (rare; CI debugging at most).
+    if !args.no_default_scrub {
+        env_capture = env_capture
+            .scrub(DEFAULT_SCRUB_REGEX)
+            .expect("compiled-in default scrub regex");
+    }
     for pat in &args.scrub_env {
         env_capture = env_capture
             .scrub(pat)
@@ -229,11 +262,50 @@ pub fn run(store_root: &Path, args: Args) -> anyhow::Result<()> {
     };
     let trace_digest = blobs.put(&trace_bytes)?;
 
-    // Effects ledger. If --effects-from-jsonl is supplied, fold each
-    // line into the on-disk ledger. The header records the entry count
-    // so consumers can sanity-check at restore time.
+    // Effects ledger.
+    //
+    // v1.0.7 audit fix (#34): we now route every effects entry through
+    // pf_effects::Ledger::append, which computes a real
+    // `session_hmac = HMAC(secret, prev_hash || this_hash)` per entry.
+    // Prior versions wrote raw JSONL with `session_hmac = ""` so
+    // tampering / reordering was undetectable.
+    //
+    // The session secret comes from `--session-secret-hex <hex>` /
+    // `PF_SESSION_SECRET` (operator-supplied — preferred for real
+    // ACRFence) or is freshly generated per-snapshot. When generated
+    // here we embed the hex as a header field so `pf verify` can
+    // perform tamper detection without an out-of-band secret; this is
+    // documented as "tamper-detection mode" — a determined attacker
+    // who can rewrite the blob can also re-sign it using the embedded
+    // secret. Real ACRFence requires the operator to keep the secret
+    // out of band (do not pass --embed-session-secret).
     let ledger_digest = {
-        let mut entries: Vec<serde_json::Value> = Vec::new();
+        use pf_effects::ledger::{Ledger, SessionSecret};
+
+        // Resolve secret bytes first (so we can optionally embed
+        // them into the blob header for tamper-detection mode), then
+        // construct SessionSecret from those bytes.
+        let (secret_bytes, embed_in_blob) = if let Ok(hex_str) = std::env::var("PF_SESSION_SECRET")
+        {
+            (
+                hex::decode(hex_str.trim())
+                    .map_err(|e| CliError::BadInput(format!("PF_SESSION_SECRET hex: {e}")))?,
+                false, // operator brought their own; don't echo it back
+            )
+        } else {
+            {
+                use ring::rand::SecureRandom;
+                let mut buf = [0u8; 32];
+                ring::rand::SystemRandom::new()
+                    .fill(&mut buf)
+                    .map_err(|_| CliError::BadInput("session-secret RNG failed".into()))?;
+                (buf.to_vec(), true)
+            }
+        };
+        let secret_hex = hex::encode(&secret_bytes);
+        let secret = SessionSecret::new(secret_bytes);
+
+        let mut ledger = Ledger::new(secret);
         if let Some(p) = &args.effects_from_jsonl {
             for (lineno, line) in std::fs::read_to_string(p)?.lines().enumerate() {
                 if line.trim().is_empty() {
@@ -245,19 +317,82 @@ pub fn run(store_root: &Path, args: Args) -> anyhow::Result<()> {
                         lineno + 1
                     ))
                 })?;
-                entries.push(v);
+                let tool_id = v.get("tool_id").and_then(|x| x.as_str()).ok_or_else(|| {
+                    CliError::BadInput(format!(
+                        "--effects-from-jsonl line {} missing tool_id",
+                        lineno + 1
+                    ))
+                })?;
+                let args_hash_str = v.get("args_hash").and_then(|x| x.as_str()).unwrap_or("");
+                let result_hash_str = v.get("result_hash").and_then(|x| x.as_str()).unwrap_or(
+                    "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                );
+                let idempotency_key = v
+                    .get("idempotency_key")
+                    .and_then(|x| x.as_str())
+                    .unwrap_or("")
+                    .to_owned();
+                let class_str = v
+                    .get("side_effect_class")
+                    .and_then(|x| x.as_str())
+                    .unwrap_or("irreversible");
+                let side_effect_class = match class_str {
+                    "pure" => pf_effects::ledger::SideEffectClass::Pure,
+                    "idempotent" => pf_effects::ledger::SideEffectClass::Idempotent,
+                    "network-only" => pf_effects::ledger::SideEffectClass::NetworkOnly,
+                    _ => pf_effects::ledger::SideEffectClass::Irreversible,
+                };
+                let args_hash = pf_core::digest::Digest256::parse(args_hash_str)
+                    .unwrap_or_else(|_| pf_core::digest::Digest256::of(&[]));
+                let result_hash = pf_core::digest::Digest256::parse(result_hash_str)
+                    .unwrap_or_else(|_| pf_core::digest::Digest256::of(&[]));
+                let timestamp = v
+                    .get("ts")
+                    .and_then(|x| x.as_str())
+                    .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
+                    .map_or_else(chrono::Utc::now, |dt| dt.with_timezone(&chrono::Utc));
+                ledger
+                    .append(
+                        timestamp,
+                        tool_id,
+                        args_hash,
+                        idempotency_key,
+                        result_hash,
+                        side_effect_class,
+                    )
+                    .map_err(|e| CliError::BadInput(format!("ledger append: {e}")))?;
             }
         }
-        let mut body = format!(
-            "{{\"kind\":\"effects.ledger.v1\",\"entries\":{}}}\n",
-            entries.len()
-        )
-        .into_bytes();
-        for e in entries {
-            body.extend_from_slice(serde_json::to_string(&e)?.as_bytes());
-            body.push(b'\n');
+
+        // Serialize via Ledger::serialize, then post-process the
+        // header line to optionally embed the session-secret hex
+        // (tamper-detection mode).
+        let raw_digest = ledger.serialize(blobs.as_ref())?;
+        if embed_in_blob {
+            let raw_bytes = blobs.get(&raw_digest)?;
+            // Replace the header line with an extended one that
+            // carries `session_secret_hex`. Body stays untouched.
+            let mut split = raw_bytes.splitn(2, |b| *b == b'\n');
+            let header_bytes = split.next().unwrap_or(&[]);
+            let body_bytes = split.next().unwrap_or(&[]);
+            let mut header: serde_json::Value = serde_json::from_slice(header_bytes)?;
+            if let Some(obj) = header.as_object_mut() {
+                obj.insert(
+                    "session_secret_hex".to_owned(),
+                    serde_json::Value::String(secret_hex.clone()),
+                );
+                obj.insert(
+                    "verification_mode".to_owned(),
+                    serde_json::Value::String("tamper-detection".into()),
+                );
+            }
+            let mut new_blob = serde_json::to_vec(&header)?;
+            new_blob.push(b'\n');
+            new_blob.extend_from_slice(body_bytes);
+            blobs.put(&new_blob)?
+        } else {
+            raw_digest
         }
-        blobs.put(&body)?
     };
 
     // Model (empty Lora envelope).

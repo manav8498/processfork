@@ -369,6 +369,16 @@ pub fn read_blob<'py>(
     Ok(pyo3::types::PyBytes::new_bound(py, &bytes))
 }
 
+/// Store `bytes` content-addressed; returns the resulting digest as
+/// a `sha256:<hex>` string. Used by the vLLM/SGLang adapters to
+/// persist KV-cache page bytes + their per-snapshot page manifest.
+#[pyfunction]
+pub fn put_blob(store: &PyPfStore, bytes: Vec<u8>) -> PyResult<String> {
+    let blobs: Arc<dyn BlobStore> = store.inner.blobs_arc();
+    let d = blobs.put(&bytes).map_err(map_err)?;
+    Ok(d.as_str().to_owned())
+}
+
 fn json_value_to_py(py: Python<'_>, v: &serde_json::Value) -> PyResult<PyObject> {
     use serde_json::Value;
     Ok(match v {
@@ -469,6 +479,7 @@ fn _pf_py(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(checkout_filesystem, m)?)?;
     m.add_function(wrap_pyfunction!(read_manifest, m)?)?;
     m.add_function(wrap_pyfunction!(read_blob, m)?)?;
+    m.add_function(wrap_pyfunction!(put_blob, m)?)?;
     m.add_function(wrap_pyfunction!(merge, m)?)?;
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
     Ok(())

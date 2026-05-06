@@ -38,6 +38,8 @@ anyhow       = { workspace = true }
 thiserror    = { workspace = true }
 chrono       = { workspace = true }
 serde_json   = { workspace = true }
+hex          = { workspace = true }
+ring         = { workspace = true }
 
 [target.'cfg(unix)'.dependencies]
 # SIGSTOP/SIGCONT for `pf snapshot --pause-pid` (v1.0.4 audit fix
@@ -48,3 +50,6 @@ nix          = { workspace = true }
 assert_cmd   = "2.0"
 predicates   = "3.1"
 tempfile     = { workspace = true }
+# Used by the v1.0.7 ledger-tamper regression test which rewrites a
+# blob on disk in its zstd-compressed form.
+zstd         = { workspace = true }
