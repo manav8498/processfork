@@ -18,6 +18,26 @@ ignore = [
     # Lower-severity warning; tracked for v1.0.1 — likely indicatif
     # itself will swap the dep before we need to.
     "RUSTSEC-2025-0119",
+    # rustls-webpki 0.101.7 (transitive: aws-sdk-s3 → aws-smithy-http-client
+    # → rustls 0.21 → rustls-webpki). Three CVEs published 2026-05:
+    #
+    #   RUSTSEC-2026-0098  URI-name constraint accepted unconditionally.
+    #                      Reachable only after signature verification, and
+    #                      rustls-webpki has no public API for asserting URI
+    #                      names — we don't expose that surface.
+    #   RUSTSEC-2026-0099  Wildcard-name constraint accepted in DNS subtree.
+    #                      Same scope (signature must verify first +
+    #                      misissuance required).
+    #   RUSTSEC-2026-0104  Reachable panic in CRL parsing. We don't issue
+    #                      or verify CRLs; aws-smithy doesn't either.
+    #
+    # All fixed in rustls-webpki ≥0.103.12. We can't move the AWS dep
+    # tree to a newer rustls without aws-smithy-http-client itself
+    # bumping its rustls floor — tracked for v1.0.3 (likely arrives
+    # via aws-sdk-s3 1.135+).
+    "RUSTSEC-2026-0098",
+    "RUSTSEC-2026-0099",
+    "RUSTSEC-2026-0104",
 ]
 
 [licenses]
@@ -37,6 +57,9 @@ allow = [
     # which is permissive and FSF/OSI-approved. Reaches us via reqwest →
     # hyper-rustls → webpki-roots → pf-registry → pf-cli.
     "CDLA-Permissive-2.0",
+    # foldhash ships under Zlib (OSI-approved + FSF Free/Libre). Reaches
+    # us via aws-sdk-s3 → lru → hashbrown → foldhash.
+    "Zlib",
 ]
 confidence-threshold = 0.9
 exceptions = []
