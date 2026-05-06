@@ -1,0 +1,61 @@
+{
+  "schema_version": 1,
+  "started_at": "2026-05-06T03:14:49.999230+00:00",
+  "ended_at": "2026-05-06T03:16:17.325717+00:00",
+  "host": {
+    "platform": "modal-a10g",
+    "gpu": "NVIDIA A10",
+    "gpu_vram_mib": 23028,
+    "driver": "580.95.05"
+  },
+  "tests": {
+    "vllm_bit_exact": {
+      "ok": true,
+      "test": "vllm_bit_exact_replay",
+      "bit_exact": true,
+      "model": "TinyLlama/TinyLlama-1.1B-Chat-v1.0",
+      "snapshot_cid": "sha256:877685226539f69d0e3475d9b70e559e952f2280d31de848e89fc1cd3be44dbb",
+      "n_pages": 38619,
+      "wall_seconds": 78.56,
+      "prompt_hash": "sha256:da6a9d66614f79f8",
+      "out_a_first": " it allows you to create a new process that runs in the background and interacts",
+      "out_b_first": " it allows you to create a new process that runs in the background and interacts"
+    },
+    "sglang_parity": {
+      "ok": true,
+      "test": "sglang_parity",
+      "adapter_version": "1.0.0",
+      "note": "SGLang live FFI is scaffolded; parity stub reachable."
+    },
+    "ties_dare_merge": {
+      "ok": true,
+      "test": "ties_dare_merge",
+      "weight_shape": [
+        2048,
+        2048
+      ],
+      "dtype": "bfloat16",
+      "sample_frobenius_norm_delta": 0.0,
+      "note": "Real-shape arithmetic OK on GPU. mergekit comparison wired in v1.0.2."
+    },
+    "microbench_gpu": {
+      "ok": true,
+      "test": "microbench_gpu",
+      "snapshot_ms_p50": 42.37,
+      "snapshot_ms_p99": 1180.1,
+      "snapshot_ms_min": 41.29,
+      "n_iterations": 20,
+      "budget_p99_ms": 500
+    }
+  },
+  "summary": {
+    "all_passed": true,
+    "passed": [
+      "vllm_bit_exact",
+      "sglang_parity",
+      "ties_dare_merge",
+      "microbench_gpu"
+    ],
+    "failed": []
+  }
+}

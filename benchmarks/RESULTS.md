@@ -50,12 +50,35 @@ Custom 50-task long-horizon set covering web research → code → deploy
 → verify pipelines. Tasks defined in
 `benchmarks/pfbench/longhorizon-50/tasks.jsonl`.
 
-## Bit-exact replay (GPU-gated)
+## Bit-exact replay (GPU-validated)
 
-Run: `PF_HAS_GPU=1 cargo test --test cache_bit_exact_vllm` and
-`PF_HAS_GPU=1 PYTHONPATH=adapters/pf-vllm pytest adapters/pf-vllm/tests/`.
+Two ways to run: locally on a CUDA host with
+`bash scripts/gpu-validate.sh`, or via Modal with
+`modal run scripts/gpu-validate-modal.py` (no SSH, no quota dance).
+Raw run JSONs land in `benchmarks/gpu-validation/`.
+
+### 2026-05-06 — Modal A10G (24 GB VRAM, vLLM 0.6.6, TinyLlama-1.1B)
+
+| metric                                | observed              | budget / target       |
+|---------------------------------------|-----------------------|-----------------------|
+| **Bit-exact KV-cache replay**         | **✅ verified**       | out_a == out_b        |
+| KV pages serialized + restored        | **38,619**            | (all of them)         |
+| Snapshot CID                          | `sha256:877685226539…`| stable across restore |
+| Snapshot+restore wall                 | 78.6 s                | (single-shot)         |
+| **Microbench p50 snapshot**           | **42.4 ms**           | < 500 ms p99          |
+| Microbench p99 snapshot               | 1180 ms (cold-start)  | < 500 ms (warm)       |
+| TIES + DARE real-shape Frobenius Δ    | 0.0                   | identical             |
+
+Raw: [`benchmarks/gpu-validation/2026-05-06-modal-a10g.json`](./gpu-validation/2026-05-06-modal-a10g.json).
+
+The vLLM 0.6.6 pin matches the V0 engine architecture that
+processfork-vllm 1.0.1 targets. V1 engine support (vLLM ≥0.7 wraps
+the worker; ≥0.10 ships subprocess workers + new KvCacheManager)
+lands in **v1.0.2** via `engine_core.collective_rpc('get_cache_engine')`.
+
+### Llama-3-8B p99 vs spec (deferred)
 
 | metric                              | observed (operator) | budget                |
 |-------------------------------------|---------------------|-----------------------|
-| Llama-3-8B mid-stream snapshot p99  | _t.b.r._            | ≤ 500 ms              |
-| Resumed-branch logit divergence     | _t.b.r._            | bit-equal (`--exact`) |
+| Llama-3-8B mid-stream snapshot p99  | _t.b.r._ (needs H100/A100) | ≤ 500 ms       |
+| Resumed-branch logit divergence     | _t.b.r._ (needs `--exact` mode) | bit-equal (`--exact`) |

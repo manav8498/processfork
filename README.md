@@ -100,16 +100,18 @@ Identical content shares storage automatically — 12 parallel forks use **~1.5�
 
 ## Status
 
-`v1.0.0` tagged. Numbers from `cargo bench`:
+`v1.0.1` tagged. Live across PyPI, crates.io, npm, and GHCR.
 
-| metric                                  | observed     | target       |
-|-----------------------------------------|--------------|--------------|
-| Snapshot (synthetic 4-layer fixture)    | **8 ms**     | < 500 ms     |
-| Cache capture, 64 pages                 | 531 µs       | —            |
-| 12-fork ÷ 1-fork storage ratio          | well < 1.5×  | ≤ 1.5×       |
-| Total tests passing                     | **200**      | —            |
+| metric                                  | observed         | target       |
+|-----------------------------------------|------------------|--------------|
+| Snapshot (synthetic 4-layer fixture)    | **8 ms**         | < 500 ms     |
+| Snapshot (real GPU host, A10G)          | **42 ms p50**    | < 500 ms p99 |
+| **Bit-exact KV-cache replay** (vLLM 0.6.6, TinyLlama-1.1B on A10G) | **✅ verified** — 38,619 pages restored bit-exact | out_a == out_b |
+| Cache capture, 64 pages                 | 531 µs           | —            |
+| 12-fork ÷ 1-fork storage ratio          | well < 1.5×      | ≤ 1.5×       |
+| Total tests passing                     | **200**          | —            |
 
-Live KV-cache replay against a real Llama-3-8B vLLM server is the v1.0.1 deliverable — wire format and adapter API ship today, the live FFI lands next.
+Run details + raw JSON in [`benchmarks/RESULTS.md`](./benchmarks/RESULTS.md). vLLM ≥0.10 (V1 engine, subprocess-worker architecture) is the v1.0.2 milestone — the v1.0.1 adapter targets V0's directly-introspectable `CacheEngine`.
 
 ## Install
 
