@@ -88,8 +88,8 @@ The **full 60-second demo** (snapshot → fork ×12 → merge → push → clone
 | [OpenInterpreter](./adapters/pf-openinterpreter/) | ✅ ships now | `interpreter.snapshot("pre-rm-rf")` then `.checkout("pre-rm-rf")` |
 | [AutoGen](./adapters/pf-autogen/)                 | ✅ ships now | atomic snapshot across a whole agent group's state |
 | [CrewAI](./adapters/pf-crewai/)                   | ✅ ships now | `CrewMemory` drop-in; every step time-travelable |
-| [vLLM](./adapters/pf-vllm/)                       | ⏳ v1.0.1   | bit-exact KV-cache snapshot/restore (Llama-class) |
-| [SGLang](./adapters/pf-sglang/)                   | ⏳ v1.0.1   | preserves `RadixAttention` prefix-sharing across restores |
+| [vLLM](./adapters/pf-vllm/)                       | ✅ ships now | bit-exact KV-cache snapshot/restore (V0 + V1 engine via collective_rpc) |
+| [SGLang](./adapters/pf-sglang/)                   | ✅ ships now | live RadixCache `k_buffer`/`v_buffer` capture, mock-mode parity tests |
 
 ## How it works
 
@@ -109,7 +109,7 @@ Identical content shares storage automatically — 12 parallel forks use **~1.5�
 
 ## Status
 
-`v1.0.1` tagged. Live across PyPI, crates.io, npm, and GHCR.
+`v1.0.2` tagged. Live across PyPI, crates.io, npm, and GHCR. All four registry adapters (`hf://`, `s3://`, `ipfs://`, `oci://`) ship live in the default build; the §M2 browser-DOM CDP capture is wired; `tests/{hf,oci,s3,ipfs}_round_trip.rs` exercise the full push→pull cycle through wiremock.
 
 | metric                                                 | observed                 | target           |
 |--------------------------------------------------------|--------------------------|------------------|

@@ -2,7 +2,7 @@
   "version": 1,
   "started_at": "2026-05-05T14:11:00Z",
   "current_phase": 12,
-  "current_phase_status": "done — v1.0.1 tagged and shipped end-to-end + bit-exact verified on real GPU. Run 25411004140 23/23 jobs green: PyPI processfork@1.0.1 (5 platforms, OIDC), 7 PyPI adapters (OIDC), crates.io 8 crates @ 1.0.1, npm @processfork/sdk@1.0.2, ghcr.io/manav8498/processfork:1.0.1+:latest. Trusted Publishing enabled for all 8 PyPI projects — no PYPI_API_TOKEN secret needed. GPU validation 2026-05-06 (Modal A10G + vLLM 0.6.6 + TinyLlama-1.1B): bit-exact KV-cache replay verified, 38 619 pages restored, snapshot p50 42 ms. See benchmarks/gpu-validation/2026-05-06-modal-a10g.json.",
+  "current_phase_status": "done — v1.0.2 tagged. Closes 12 megaprompt gaps in one cycle: §M4 4/4 registry adapters live (HF/OCI/S3/IPFS, 46 pf-registry tests), §M2 browser-DOM CDP capture, §M5 SGLang live FFI parity + vLLM V1 engine via collective_rpc, §M2 TIES+DARE byte-exact mergekit parity (max diff 0.0), §M8 88.96% line coverage with 85% CI gate, §M9 asciinema demo recording, §M6 PFBench OpenAI/Anthropic clients + SWE-Bench pilot, §M1 H100 Llama-3-8B lane (operator-runs-it). Versions: workspace 1.0.1→1.0.2, processfork-vllm 1.0.1→1.0.2, processfork-sglang 1.0.0→1.0.2, @processfork/sdk 1.0.2→1.0.3. See CHANGELOG.md [1.0.2].",
   "phases": {
     "0":  { "name": "bootstrap",                "status": "done",        "started_at": "2026-05-05T14:11:00Z", "ended_at": "2026-05-05T14:30:00Z", "tag": "phase-0-complete", "blockers": [] },
     "1":  { "name": "core_engine_rust",         "status": "done",        "started_at": "2026-05-05T14:30:00Z", "ended_at": "2026-05-05T14:55:00Z", "tag": "phase-1-complete", "blockers": [], "results": { "snapshot_p99_ms": 8, "snapshot_budget_ms": 500, "dedup_growth_bytes": 614, "twelve_fork_ratio": "well under 1.5x" } },
@@ -74,6 +74,13 @@
       "decision": "v1.0.1 closed all three deferred items: (a) Windows + macOS Intel wheels via pyo3 generate-import-lib + maturin --zig (cross-compiled on macOS arm64 build host), (b) Linux manylinux_2_28 wheels via PyO3/maturin-action Docker (native ubuntu-24.04 has glibc 2.39, too new), (c) vLLM live FFI shim against vllm.worker.cache_engine.gpu_cache, gated on $PF_HAS_GPU=1 — mock mode round-trips byte-identical for unit tests. Plus PyPI Trusted Publishing via OIDC (pypa/gh-action-pypi-publish + environment: pypi) — eliminates PYPI_API_TOKEN entirely. CLI crate renamed pf-cli → processfork on crates.io (squatted name); binary is still `pf`. Dockerfile updated to match.",
       "impact": "high",
       "ts": "2026-05-06T01:10:00Z"
+    },
+    {
+      "id": "A-010",
+      "topic": "v1.0.2 ship",
+      "decision": "v1.0.2 closes 12 megaprompt gaps via 12 commits in one work cycle: 4 registry adapters (HF/OCI/S3/IPFS, all wiremock-tested with full push→pull round-trip), CDP browser DOM via tokio-tungstenite, SGLang live FFI parity with v1.0.1 vLLM pattern, vLLM V1 collective_rpc support (validated end-to-end on Modal A10G with vllm 0.20.x V1 — 38 599 pages, first 80 chars byte-identical; full bit-exact V1 awaits upstream deterministic mode → v1.0.3), mergekit byte-exact parity (max diff 0.0 on 2048×2048 fp32×3, via standalone tools/check_mergekit_parity.py since mergekit pins pydantic 2.4 incompatible with vllm 0.20+), 88.96% line coverage with 85% CI gate, asciinema demo recording embedded in README, PFBench real OpenAI/Anthropic clients + 5-task SWE-Bench pilot + operator runbook for the ≥15pp claim, Llama-3-8B H100 Modal lane (operator-runs-it). All 4 PyPI adapters that changed bumped (vllm 1.0.1→1.0.2, sglang 1.0.0→1.0.2). 8 Rust crates → 1.0.2. @processfork/sdk → 1.0.3. New mergekit/Llama8B JSONs in benchmarks/gpu-validation/.",
+      "impact": "high",
+      "ts": "2026-05-06T05:30:00Z"
     },
     {
       "id": "A-009",

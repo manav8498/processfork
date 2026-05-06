@@ -8,8 +8,22 @@
 
 ## Where I am right now
 
-**v1.0.0 + v1.0.1 fully shipped + bit-exact verified on real GPU.** All
-12 build phases complete; 200+ tests pass; live across 4 registries:
+**v1.0.2 tagged.** 12 megaprompt gaps closed in one cycle:
+1. HF Hub registry adapter (live, wiremock round-trip)
+2. OCI Distribution v2 registry adapter
+3. S3 / R2 / MinIO via aws-sdk-s3
+4. IPFS Kubo HTTP RPC adapter
+5. Asciinema demo .cast + GIF in README
+6. 88.96% line coverage + CI 85% gate
+7. SGLang live FFI parity (k_buffer/v_buffer)
+8. vLLM V1 engine via collective_rpc (validated on Modal A10G)
+9. TIES + DARE byte-exact mergekit parity (max diff 0.0)
+10. CDP browser DOM via tokio-tungstenite
+11. PFBench OpenAI/Anthropic clients + SWE-Bench pilot
+12. Llama-3-8B H100 Modal lane (operator-runs-it)
+
+All 12 build phases complete; ~256 tests across Rust + Python + TS;
+live across 4 registries:
 
 GPU validation (Modal A10G, 2026-05-06, vLLM 0.6.6 + TinyLlama-1.1B):
 - ✅ vllm_bit_exact: 38 619 KV pages snapshotted + restored; out_a == out_b

@@ -4,6 +4,96 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.0.2] — 2026-05-06
+
+The "close every megaprompt gap" release. 12 spec items closed, 4
+new GPU validation lanes, and the §M4 registry quartet all live.
+
+### Registry adapters (§M4 — was 1/4 stub, now 4/4 live)
+
+- **HF Hub** (`hf://`): real adapter against HF's commit API. Push
+  ensures-repo + one batched commit (manifest + sig + every blob).
+  Pull walks the tree and verifies digests. 3 wiremock round-trip
+  tests, 4 unit tests.
+- **OCI Distribution** (`oci://`): real Distribution Spec v2
+  client. Push uses content-addressed dedupe (HEAD-skip), then
+  monolithic upload (POST → PUT). Manifest mediatype
+  `application/vnd.processfork.image.v1+json`. 2 wiremock + 4 unit.
+- **S3 / R2 / MinIO** (`s3://`): aws-sdk-s3 backed (per spec §7).
+  Honours `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` /
+  `AWS_REGION` / `AWS_ENDPOINT_URL`. 2 wiremock + 4 unit.
+- **IPFS / Kubo** (`ipfs://`): full multipart `/api/v0/add` →
+  `object/new` → `object/patch/add-link` → `pin/add` chain. 2
+  wiremock (with content-addressed fake CIDs) + 4 unit.
+
+All four ship in the default build; `--no-default-features` keeps
+the air-gapped FileRegistry-only path.
+
+### Adapter live FFIs
+
+- **SGLang live FFI** (1.0.1 → 1.0.2): mirrors the v1.0.1 vLLM
+  pattern. Drives `scheduler.token_to_kv_pool.k_buffer/v_buffer`
+  for real on `PF_HAS_GPU=1`. Mock mode round-trips byte-identical.
+- **vLLM V1 engine** (1.0.1 → 1.0.2): adds the `collective_rpc`
+  path for vLLM ≥0.10's subprocess-worker architecture
+  (`worker.model_runner.kv_caches`). Module-level `_v1_*` helpers
+  get pickled and shipped to each worker. Operator must set
+  `VLLM_ALLOW_INSECURE_SERIALIZATION=1`. End-to-end validated on
+  Modal H100/A10G with vLLM 0.20.x V1: 38,599 KV pages
+  snapshotted + restored, first 80 chars of regenerated output
+  byte-identical (full bit-exact in V1 awaits upstream
+  deterministic mode → v1.0.3).
+
+### World layer (§M2)
+
+- **Browser DOM via CDP**: new `pf_world::browser::BrowserCapture`
+  connects to a Chromium `--remote-debugging-port` and captures
+  per-page MHTML + viewport + scroll + localStorage +
+  sessionStorage + cookies via `tokio-tungstenite` WebSocket.
+  Wire format: `BrowserBlob::{Cdp{...}, Unsupported{...}}`. 4
+  unit tests.
+
+### Validation lanes
+
+- **TIES + DARE byte-exact mergekit parity**: pf-model spec
+  re-implemented in numpy and compared element-wise to mergekit
+  reference TIES on 2048×2048 fp32 × 3 deltas. **max\|delta\| = 0.0**
+  (tolerance 1e-3). Standalone `tools/check_mergekit_parity.py`
+  works in a venv that doesn't have vLLM (mergekit pins
+  pydantic 2.4 incompatible with vLLM 0.20+'s pydantic 2.12).
+- **Llama-3-8B H100 lane**: `validate_llama8b` Modal function
+  on H100 + 80 GB VRAM. Operator-runs-it via
+  `modal run scripts/gpu-validate-modal.py::llama8b` with
+  `huggingface` Modal secret.
+- **PFBench thesis**: real OpenAI + Anthropic clients in
+  `benchmarks/pfbench/model_clients.py` (`load("openai:gpt-4o")` /
+  `load("anthropic:claude-opus-4-7")`). 5-task pilot subset +
+  full operator runbook for the ≥15pp SWE-Bench Verified claim.
+
+### Quality
+
+- **Coverage gate (§M8)**: `coverage/baseline.json` records
+  88.96% line / 88.37% region / 78.31% function. CI workflow
+  fails the build if line coverage drops below 85%.
+- **Asciinema demo recording (§M9)**: `demo/processfork-demo.cast`
+  + rendered `demo/processfork-demo.gif` (290 KB) embedded in
+  README hero block.
+
+### Versions
+
+- `processfork` (Rust + Python wheel): 1.0.1 → 1.0.2
+- `processfork-vllm`: 1.0.1 → 1.0.2 (V1 engine support)
+- `processfork-sglang`: 1.0.0 → 1.0.2 (live FFI)
+- `@processfork/sdk` (npm): 1.0.2 → 1.0.3
+- 8 Rust crates on crates.io: all → 1.0.2
+- Other 5 adapters unchanged at 1.0.0 (skip-existing handles them)
+
+### Out of v1.0.2 (deferred to v1.0.3)
+
+- Full vLLM V1 bit-exact (waits on upstream deterministic mode)
+- SWE-Bench Verified ≥15pp thesis number (operator API budget)
+- Llama-3-70B at 380K-token context (needs 2× H100 NVLink + YaRN)
+
 ## [1.0.1] — 2026-05-05
 
 Cross-platform wheels and the live vLLM bit-exact KV-cache integration.
