@@ -17,7 +17,7 @@ workspace = true
 # air-gapped builds that only want the FileRegistry.
 default = ["hf-live", "s3-live", "ipfs-live", "oci-live"]
 hf-live   = ["dep:reqwest", "dep:base64"]
-s3-live   = ["dep:reqwest"]
+s3-live   = ["dep:aws-sdk-s3", "dep:aws-config", "dep:aws-credential-types"]
 ipfs-live = ["dep:reqwest"]
 oci-live  = ["dep:reqwest", "dep:base64"]
 
@@ -31,6 +31,9 @@ tokio      = { workspace = true }
 async-trait = "0.1"
 reqwest    = { workspace = true, optional = true }
 base64     = { workspace = true, optional = true }
+aws-sdk-s3 = { workspace = true, optional = true }
+aws-config = { workspace = true, optional = true }
+aws-credential-types = { workspace = true, optional = true }
 zstd       = { workspace = true }
 sha2       = { workspace = true }
 hex        = { workspace = true }

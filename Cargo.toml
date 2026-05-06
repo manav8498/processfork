@@ -121,6 +121,13 @@ base64 = "0.22"
 # wiremock — in-process HTTP mock server for HF/S3/OCI registry tests
 # without hitting the live services. Dev-only.
 wiremock = "0.6"
+# AWS S3 SDK — used by the s3:// registry adapter for real SigV4 +
+# multi-region + R2/MinIO compatibility. Justified per megaprompt §7
+# ("S3: aws-sdk-s3.").
+aws-sdk-s3 = { version = "1.74", default-features = false, features = ["rt-tokio", "rustls"] }
+aws-config = { version = "1.5", default-features = false, features = ["rt-tokio", "rustls", "behavior-version-latest"] }
+aws-credential-types = "1.2"
+aws-smithy-runtime-api = "1.7"
 
 # Bindings
 # `extension-module` is opt-in per-crate (pf-py turns it on under the

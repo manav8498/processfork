@@ -212,8 +212,35 @@ async fn hf_adapter_returns_unsupported_when_feature_off() {
     assert!(matches!(r, RegistryError::UnsupportedScheme(_)));
 }
 
+/// Live S3 build (default since v1.0.2). Without an endpoint or
+/// creds the SDK returns a Backend error trying to talk to AWS;
+/// real round-trip coverage lives in `s3_round_trip.rs`.
+#[cfg(feature = "s3-live")]
 #[tokio::test]
-async fn s3_adapter_returns_unsupported_in_default_build() {
+async fn s3_adapter_no_endpoint_pull_errors_cleanly() {
+    let mut auth = std::collections::BTreeMap::new();
+    // Point at an unreachable endpoint so we don't accidentally hit
+    // real AWS; either way the result is Backend(...), not panic /
+    // UnsupportedScheme.
+    auth.insert("AWS_ENDPOINT_URL".into(), "http://127.0.0.1:1".into());
+    auth.insert("AWS_ACCESS_KEY_ID".into(), "x".into());
+    auth.insert("AWS_SECRET_ACCESS_KEY".into(), "y".into());
+    let reg = S3Registry::new(auth);
+    let r = reg
+        .pull(&ImageRef::S3 {
+            bucket: "b".into(),
+            prefix: "p".into(),
+        })
+        .await
+        .unwrap_err();
+    assert!(matches!(r, RegistryError::Backend(_)));
+}
+
+/// In a build without `s3-live`, the adapter still returns
+/// UnsupportedScheme so callers get a clear migration message.
+#[cfg(not(feature = "s3-live"))]
+#[tokio::test]
+async fn s3_adapter_returns_unsupported_when_feature_off() {
     let reg = S3Registry::new(std::collections::BTreeMap::default());
     let r = reg
         .pull(&ImageRef::S3 {
