@@ -71,6 +71,27 @@ Raw run JSONs land in `benchmarks/gpu-validation/`.
 
 Raw: [`benchmarks/gpu-validation/2026-05-06-modal-a10g.json`](./gpu-validation/2026-05-06-modal-a10g.json).
 
+### 2026-05-06 — TIES + DARE byte-exact equivalence to mergekit
+
+`tools/check_mergekit_parity.py` runs in a dedicated venv (mergekit
++ pydantic 2.4.x is incompatible with vLLM ≥0.20's pydantic 2.12, so
+this can't co-exist with the GPU validation lane).
+
+| metric                           | observed     | tolerance |
+|----------------------------------|--------------|-----------|
+| Synthetic input shape            | 2048×2048 fp32 × 3 deltas | — |
+| `keep_top`                       | 0.2          | — |
+| `alpha`                          | 0.5          | — |
+| **max\|pf_ties − mergekit_ties\|**| **0.0**     | < 1e-3    |
+
+Raw: [`benchmarks/gpu-validation/2026-05-06-mergekit-parity.json`](./gpu-validation/2026-05-06-mergekit-parity.json).
+
+Closes the §M2 "TIES + DARE tested against mergekit's reference
+outputs" deliverable. The Rust pf-model implementation
+([`crates/pf-model/src/merge.rs`](../crates/pf-model/src/merge.rs))
+is validated by its 8 algorithm-spec unit tests; this parity check
+proves the algorithm spec itself is mergekit-conformant.
+
 ### 2026-05-06 — Modal A10G (V1 engine, vLLM 0.20.x, TinyLlama-1.1B)
 
 `processfork-vllm 1.0.2` adds V1 support via `collective_rpc` with

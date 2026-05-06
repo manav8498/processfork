@@ -1,0 +1,12 @@
+{
+  "ok": true,
+  "weight_shape": [
+    2048,
+    2048
+  ],
+  "n_deltas": 3,
+  "keep_top": 0.2,
+  "alpha": 0.5,
+  "max_abs_diff": 0.0,
+  "tolerance": 0.001
+}

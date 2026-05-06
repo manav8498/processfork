@@ -65,21 +65,31 @@ def main() -> int:
     try:
         import torch
         from mergekit.merge_methods.generalized_task_arithmetic import (
-            sign_consensus,
-            sparsify_magnitude,
+            get_mask,
+            sparsify,
         )
+        from mergekit.sparsify import SparsificationMethod
     except ImportError as e:
         print(json.dumps({"ok": False, "error": f"mergekit not installed: {e}"}))
         return 2
 
     tensors = [torch.from_numpy(d) for d in deltas]
     density = 1.0 - keep_top
-    sparse = [sparsify_magnitude(t, density) for t in tensors]
+    # Magnitude sparsification = TIES "trim" step. mergekit's sparsify
+    # zeroes out the bottom (1-density) by magnitude, exactly matching
+    # pf-model's trim_bottom().
+    sparse = [
+        sparsify(t, density=density, method=SparsificationMethod.magnitude)
+        for t in tensors
+    ]
     stack = torch.stack(sparse, dim=0)
-    sign = sign_consensus(stack)
-    mask = (stack.sign() == sign.unsqueeze(0)) & (stack != 0)
-    count = mask.sum(dim=0).float().clamp_min(1)
-    mk_out = ((stack * mask).sum(dim=0) / count * alpha).numpy()
+    # Sign consensus via mergekit's get_mask (sum-mode = TIES sign-elect).
+    mask_per_task = get_mask(stack, method="sum")
+    # mergekit returns a per-(task, element) mask of which entries to
+    # keep; the disjoint-mean is then sum/count.
+    selected = stack * mask_per_task.float()
+    count = mask_per_task.sum(dim=0).float().clamp_min(1)
+    mk_out = (selected.sum(dim=0) / count * alpha).numpy()
 
     max_delta = float(np.abs(pf_out - mk_out).max())
     tolerance = 1e-3
