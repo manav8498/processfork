@@ -54,6 +54,16 @@ pub struct Args {
     /// ancestor. Repeatable.
     #[arg(long)]
     pub parent: Vec<String>,
+
+    /// PID of the agent process to SIGSTOP for the duration of the
+    /// snapshot, then SIGCONT after seal. Without this, multi-file
+    /// concurrent agent writes can produce torn-state captures
+    /// (a.txt at version=1, b.txt at version=0). The pause window is
+    /// just the fs walk + env capture (typically 50–500 ms); CRIU /
+    /// CDP capture happens before the pause to keep the window tight.
+    /// Unix only — ignored on Windows where SIGSTOP doesn't exist.
+    #[arg(long)]
+    pub pause_pid: Option<i32>,
 }
 
 // `pf snapshot run()` accumulated a fair amount of validation +
@@ -106,6 +116,21 @@ pub fn run(store_root: &Path, args: Args) -> anyhow::Result<()> {
     // O(1) clonefile(2) gives us a stable read-snapshot so the agent
     // can keep writing without risking the mid-snapshot torn state
     // that the v1.0.2 audit reproduced (a.txt v1, b.txt v0).
+    //
+    // For real cross-file atomicity (APFS clone alone isn't enough —
+    // the agent could still be mid-write between two files when the
+    // clone fires), pass `--pause-pid <pid>`: we SIGSTOP the agent,
+    // run the capture, then SIGCONT. v1.0.4 audit fix.
+    #[cfg(unix)]
+    let _pause_guard = match args.pause_pid {
+        Some(pid) => Some(PauseGuard::stop(pid)?),
+        None => None,
+    };
+    #[cfg(not(unix))]
+    if args.pause_pid.is_some() {
+        eprintln!("warning: --pause-pid is unix-only; ignoring on this OS");
+    }
+
     let fs_digest = pf_world::WalkFsCapture::new(&args.fs_root)
         .use_apfs_clone(cfg!(target_os = "macos"))
         .capture(&blobs)?;
@@ -123,9 +148,50 @@ pub fn run(store_root: &Path, args: Args) -> anyhow::Result<()> {
     });
     let procs_digest = blobs.put(&serde_json::to_vec(&procs_blob)?)?;
 
-    // Trace.
+    // Trace. v1.0.4 audit fix: validate the JSONL content (not just
+    // the path) so a malformed file fails the snapshot rather than
+    // silently producing a trace blob that breaks pf merge later.
+    // Each non-blank line must be a JSON object with `role` (str)
+    // and `content` (str).
     let trace_bytes = if let Some(p) = &args.trace_from_jsonl {
-        std::fs::read(p)?
+        let raw = std::fs::read_to_string(p)?;
+        let mut canonical = Vec::new();
+        for (lineno, line) in raw.lines().enumerate() {
+            if line.trim().is_empty() {
+                continue;
+            }
+            let v: serde_json::Value = serde_json::from_str(line).map_err(|e| {
+                CliError::BadInput(format!(
+                    "--trace-from-jsonl line {} is not valid JSON: {e}",
+                    lineno + 1
+                ))
+            })?;
+            let obj = v.as_object().ok_or_else(|| {
+                CliError::BadInput(format!(
+                    "--trace-from-jsonl line {} is not a JSON object",
+                    lineno + 1
+                ))
+            })?;
+            let role = obj.get("role").and_then(|x| x.as_str()).ok_or_else(|| {
+                CliError::BadInput(format!(
+                    "--trace-from-jsonl line {} is missing string field `role`",
+                    lineno + 1
+                ))
+            })?;
+            let content = obj.get("content").and_then(|x| x.as_str()).ok_or_else(|| {
+                CliError::BadInput(format!(
+                    "--trace-from-jsonl line {} is missing string field `content`",
+                    lineno + 1
+                ))
+            })?;
+            // Re-emit canonically so downstream parsers see consistent shape.
+            canonical.extend_from_slice(
+                serde_json::to_string(&serde_json::json!({"role": role, "content": content}))?
+                    .as_bytes(),
+            );
+            canonical.push(b'\n');
+        }
+        canonical
     } else {
         Vec::new()
     };
@@ -235,4 +301,44 @@ pub fn run(store_root: &Path, args: Args) -> anyhow::Result<()> {
     let cid = store.put_manifest(&manifest)?;
     println!("{cid}");
     Ok(())
+}
+
+/// SIGSTOP a PID on construction; SIGCONT on Drop. RAII guard so the
+/// agent always resumes — even if the snapshot path errors out
+/// mid-capture. Closes the v1.0.3 audit's "torn-state" finding for
+/// operators who pass --pause-pid.
+#[cfg(unix)]
+struct PauseGuard {
+    pid: nix::unistd::Pid,
+}
+
+#[cfg(unix)]
+impl PauseGuard {
+    fn stop(raw_pid: i32) -> anyhow::Result<Self> {
+        use nix::sys::signal::{Signal, kill};
+        let pid = nix::unistd::Pid::from_raw(raw_pid);
+        kill(pid, Signal::SIGSTOP).map_err(|e| {
+            CliError::BadInput(format!("--pause-pid {raw_pid}: kill SIGSTOP failed: {e}"))
+        })?;
+        // Brief sleep so the kernel finishes scheduling the stop before
+        // we walk the fs (otherwise the agent can squeeze one more
+        // write in between the SIGSTOP send and stop-state apply).
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        Ok(Self { pid })
+    }
+}
+
+#[cfg(unix)]
+impl Drop for PauseGuard {
+    fn drop(&mut self) {
+        use nix::sys::signal::{Signal, kill};
+        // Best-effort; if SIGCONT fails (process already gone, etc.)
+        // there's nothing useful to do — log and continue.
+        if let Err(e) = kill(self.pid, Signal::SIGCONT) {
+            eprintln!(
+                "warning: pause-pid {} SIGCONT failed: {e} — agent may stay stopped",
+                self.pid
+            );
+        }
+    }
 }

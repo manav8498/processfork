@@ -122,3 +122,22 @@ def test_snapshot_via_sdk(tmp_path: Path) -> None:
     assert cid.startswith("sha256:") and len(cid) == 71
     manifest = pf.read_manifest(store, cid)
     assert manifest["agent"]["kind"] == "claude-code"
+
+    # v1.0.4 audit-fix regression: the recorded tool call must
+    # actually land in the on-disk effects ledger. v1.0.3 wired the
+    # SDK hook; v1.0.4 connects it from the SessionRecorder.
+    ledger_bytes = pf.read_blob(store, manifest["effects"]["ledger"])
+    ledger_text = ledger_bytes.decode("utf-8")
+    header_line, *entry_lines = ledger_text.strip().split("\n")
+    import json as _json
+
+    header = _json.loads(header_line)
+    assert header == {"kind": "effects.ledger.v1", "entries": 1}, (
+        "expected exactly one entry (the recorded Read call); got header %r" % header
+    )
+    assert len(entry_lines) == 1
+    entry = _json.loads(entry_lines[0])
+    assert entry["tool_id"] == "Read"
+    assert entry["side_effect_class"] in {"pure", "idempotent"}
+    assert entry["args_hash"].startswith("sha256:")
+    assert entry["idempotency_key"].startswith("sha256:")

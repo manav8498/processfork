@@ -39,6 +39,11 @@ thiserror    = { workspace = true }
 chrono       = { workspace = true }
 serde_json   = { workspace = true }
 
+[target.'cfg(unix)'.dependencies]
+# SIGSTOP/SIGCONT for `pf snapshot --pause-pid` (v1.0.4 audit fix
+# for torn-state captures during concurrent agent writes).
+nix          = { workspace = true }
+
 [dev-dependencies]
 assert_cmd   = "2.0"
 predicates   = "3.1"

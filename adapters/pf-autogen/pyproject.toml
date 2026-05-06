@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "processfork-autogen"
-version = "1.0.0"
+version = "1.0.1"
 description = "ProcessFork integration for AutoGen 0.4+ — atomic group-chat snapshots."
 readme = "README.md"
 license = { text = "MIT" }

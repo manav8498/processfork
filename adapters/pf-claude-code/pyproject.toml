@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "processfork-claude-code"
-version = "1.0.0"
+version = "1.0.1"
 description = "ProcessFork integration for Claude Code — adds /snapshot, /fork, /merge slash commands."
 readme = "README.md"
 license = { text = "MIT" }

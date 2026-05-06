@@ -61,6 +61,9 @@ class ProcessForkRuntime:
     # ---- snapshot / fork ----
 
     def snapshot(self, name: str) -> str:
+        import hashlib
+        import json
+
         import processfork
 
         # Flatten every agent's messages into a single trace blob,
@@ -71,12 +74,42 @@ class ProcessForkRuntime:
             for m in state.messages:
                 merged.append({"role": m["role"], "content": f"[{agent_name}] {m['content']}"})
 
+        # v1.0.4 audit fix: actually pass the recorded tool calls into
+        # the snapshot's effects ledger. Each entry is tagged with the
+        # source agent so the merge engine can attribute side-effects
+        # back to the right team member.
+        effects_payload = []
+        ix = 0
+        for agent_name, state in sorted(self.agents.items()):
+            for c in state.tool_calls:
+                args_canon = json.dumps(c.get("args", {}), sort_keys=True)
+                effects_payload.append(
+                    {
+                        "ix": ix,
+                        "agent": agent_name,
+                        "tool_id": c["tool"],
+                        "args_hash": "sha256:"
+                        + hashlib.sha256(args_canon.encode()).hexdigest(),
+                        "result_hash": "sha256:"
+                        + hashlib.sha256(
+                            json.dumps(c.get("result", {}), sort_keys=True).encode()
+                        ).hexdigest(),
+                        "side_effect_class": c.get("side_effect_class", "irreversible"),
+                        "idempotency_key": "sha256:"
+                        + hashlib.sha256(
+                            f"{agent_name}:{c['tool']}:{args_canon}".encode()
+                        ).hexdigest(),
+                    }
+                )
+                ix += 1
+
         cid = processfork.snapshot_filesystem(
             self.store,
             agent_kind="autogen-team",
             fs_root=str(self.fs_root),
             env=dict(os.environ),
             messages=merged,
+            effects=effects_payload,
         )
         self.snapshots[name] = cid
         return cid

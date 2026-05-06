@@ -103,12 +103,35 @@ class SessionRecorder:
         import processfork
 
         env_map = dict(env if env is not None else os.environ)
+        # v1.0.4 audit fix: actually pass the recorded tool calls into
+        # the snapshot's effects ledger so a restored agent sees them
+        # as facts (ACRFence — "won't double-send your email"). v1.0.3
+        # wired the SDK hook; this commit consumes it.
+        effects_payload = [
+            {
+                "ix": ix,
+                "tool_id": c.tool,
+                "args_hash": _sha256_of(json.dumps(c.args, sort_keys=True).encode()),
+                "result_hash": _sha256_of(
+                    json.dumps(c.result, sort_keys=True, default=str).encode()
+                ),
+                "side_effect_class": c.side_effect_class,
+                # idempotency key = sha256(tool + args) so re-issued
+                # idempotent calls dedupe; irreversible ones use the
+                # ix to make every issuance unique.
+                "idempotency_key": _sha256_of(
+                    f"{c.tool}:{json.dumps(c.args, sort_keys=True)}".encode()
+                ),
+            }
+            for ix, c in enumerate(self.tool_calls)
+        ]
         return processfork.snapshot_filesystem(
             store,
             agent_kind=agent_kind,
             fs_root=fs_root,
             env=env_map,
             messages=list(self.messages),
+            effects=effects_payload,
         )
 
 

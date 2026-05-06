@@ -4,6 +4,61 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.0.4] — 2026-05-06
+
+Closes 4 follow-up findings from the v1.0.3 audit (round 2).
+
+### Correctness fixes
+
+- **`--trace-from-jsonl` validates JSON content per line.** v1.0.3
+  only validated path existence + is_file. Now each non-empty line
+  must be a JSON object with string `role` + `content`; malformed
+  lines fail the snapshot at fail-fast time. Same treatment was
+  already in place for `--effects-from-jsonl`. 1 regression test.
+
+- **Real snapshot quiescence via `--pause-pid <pid>`.** APFS clone
+  alone gives a stable FS view but doesn't prevent torn-state
+  captures from concurrent multi-file agent writes (audit
+  reproduced `a.txt v1, b.txt v0`). New flag SIGSTOPs the agent
+  for the duration of the fs walk and SIGCONTs on Drop (RAII
+  guard so the agent always resumes — even if the snapshot path
+  errors out mid-capture). Unix only.
+
+- **Adapter recorders now persist tool calls into the effects
+  ledger.** v1.0.3 wired the SDK `effects=` hook; v1.0.4 actually
+  uses it from:
+  - `processfork_claude_code.SessionRecorder.snapshot()`
+  - `processfork_openinterpreter.WrappedInterpreter.snapshot()`
+  - `processfork_autogen.ProcessForkRuntime.snapshot()`
+
+  Each adapter now derives `args_hash`, `result_hash`,
+  `idempotency_key`, and `side_effect_class` per recorded tool
+  call and folds them into the on-disk `effects.ledger.v1` blob.
+  The ACRFence "won't double-send your email" claim has a real,
+  testable surface end-to-end. 1 regression test asserts a
+  recorded `Read` call lands as exactly 1 ledger entry with the
+  right shape.
+
+- **`examples/02-cli-snapshot/run.sh` updated.** The trailing
+  "expected exit 2 from `pf push hf://`" demo was stale (HF has
+  been live since v1.0.2). Replaced with a real `pf push file://`
+  + `pf clone file://` round-trip that runs end-to-end.
+
+### Versions
+
+- `processfork` (Rust + Python wheel): 1.0.3 → **1.0.4**
+- `processfork-claude-code`: 1.0.0 → **1.0.1** (recorder → ledger)
+- `processfork-openinterpreter`: 1.0.0 → **1.0.1** (recorder → ledger)
+- `processfork-autogen`: 1.0.0 → **1.0.1** (recorder → ledger)
+- `@processfork/sdk` (npm): 1.0.4 → **1.0.5**
+- 8 Rust crates on crates.io: all → **1.0.4**
+
+### Test count
+
+193 → 194 cargo tests workspace-wide (+1 trace-jsonl validation).
+Plus 24/24 adapter tests (Claude Code + OpenInterpreter + AutoGen +
+LangGraph), with 1 new ledger-population regression in pf-claude-code.
+
 ## [1.0.3] — 2026-05-06 — security release
 
 Closes 10 production-readiness blockers from an independent v1.0.2

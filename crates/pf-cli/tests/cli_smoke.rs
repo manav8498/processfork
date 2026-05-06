@@ -366,6 +366,31 @@ fn snapshot_with_missing_trace_path_fails_fast() {
         .stderr(contains("does not exist"));
 }
 
+/// v1.0.4 audit (round 2): --trace-from-jsonl validated path
+/// existence + is_file but accepted invalid JSON content. Now we
+/// parse each non-empty line as `{"role": str, "content": str}` and
+/// fail the snapshot at fail-fast time.
+#[test]
+fn snapshot_with_malformed_trace_jsonl_fails_fast() {
+    let store = TempDir::new().unwrap();
+    let sandbox = TempDir::new().unwrap();
+    make_sandbox(sandbox.path());
+    let bad_trace = sandbox.path().join("bad-trace.jsonl");
+    std::fs::write(
+        &bad_trace,
+        "this is not json\n{\"role\":\"user\"}\n", // line 2 missing 'content'
+    )
+    .unwrap();
+    pf(store.path())
+        .args(["snapshot", "--agent-id", "t", "--fs-root"])
+        .arg(sandbox.path())
+        .args(["--trace-from-jsonl"])
+        .arg(&bad_trace)
+        .assert()
+        .failure()
+        .stderr(contains("--trace-from-jsonl"));
+}
+
 /// v1.0.2 audit: snapshots after `pf checkout` had `parents: []`
 /// so `pf merge` reported "no common ancestor". v1.0.3 writes a
 /// `.pfcid` sentinel on checkout that snapshot autodetects as parent.

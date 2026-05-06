@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # examples/02-cli-snapshot — exercises the `pf` CLI end-to-end on a
 # tempdir-rooted store. Demonstrates: snapshot → log → status → diff →
-# checkout → verify, plus the Phase-9-deferred `push` returning exit 2
-# with a clear message.
+# checkout → verify, plus the round-trip via the local file:// registry
+# (live since v1.0.2; replaces the older HF-stub demo).
 #
 # Usage:    bash examples/02-cli-snapshot/run.sh
 # Requires: pf binary built (cargo build --release -p processfork).
@@ -65,10 +65,15 @@ echo "│ \$ pf verify"
 $PF verify | sed 's/^/│   /'
 echo "│"
 
-echo "│ \$ pf push $CID hf://demo/x      (Phase-9 deferred)"
-set +e
-$PF push "$CID" "hf://demo/x" 2>&1 | sed 's/^/│   /'
-echo "│   exit=$? (expected 2)"
-set -e
+REG=$(mktemp -d)
+echo "│ \$ pf push $CID file://$REG"
+$PF push "$CID" "file://$REG" 2>&1 | sed 's/^/│   /'
+echo "│"
+
+echo "│ \$ pf clone file://$REG --into $STORE/clone"
+$PF clone "file://$REG" --into "$STORE/clone" 2>&1 | sed 's/^/│   /'
+test -f "$STORE/clone/src/main.rs"
+rm -rf "$REG"
+echo "│"
 
 echo "└─ ✓ all CLI commands behaved as documented in agent_docs/cli-spec.md"

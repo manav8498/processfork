@@ -35,15 +35,38 @@ class WrappedInterpreter:
     # ---- snapshot / restore ----
 
     def snapshot(self, name: str) -> str:
+        import hashlib
+        import json
+
         import processfork
 
         messages = list(self._messages_from_inner())
+        # v1.0.4 audit fix: pass the recorded ledger entries through to
+        # the snapshot so a restored interpreter sees its prior tool
+        # calls as facts, not opportunities to re-issue.
+        effects_payload = [
+            {
+                "ix": ix,
+                "tool_id": e["tool"],
+                "args_hash": "sha256:"
+                + hashlib.sha256(
+                    json.dumps(e.get("args", {}), sort_keys=True).encode()
+                ).hexdigest(),
+                "side_effect_class": e.get("side_effect_class", "irreversible"),
+                "idempotency_key": "sha256:"
+                + hashlib.sha256(
+                    f"{e['tool']}:{json.dumps(e.get('args', {}), sort_keys=True)}".encode()
+                ).hexdigest(),
+            }
+            for ix, e in enumerate(self._ledger)
+        ]
         cid = processfork.snapshot_filesystem(
             self.store,
             agent_kind="open-interpreter",
             fs_root=str(self.fs_root),
             env=dict(os.environ),
             messages=messages,
+            effects=effects_payload,
         )
         self.snapshots[name] = cid
         return cid
