@@ -42,8 +42,11 @@ image = (
         # collective_rpc V1 path; this validates it end-to-end. Pin
         # at 0.20.x to keep the wire shape stable across reruns.
         "vllm>=0.20,<0.22",
-        # mergekit for the TIES + DARE reference comparison test (#3).
-        "mergekit",
+        # NOTE: arcee-ai/mergekit isn't co-installable with vLLM 0.20+
+        # (mergekit pins pydantic==2.4.0; vLLM needs pydantic>=2.12).
+        # Test #3 falls back to pf-spec self-check + DARE determinism,
+        # records mergekit_compared:false. Run mergekit comparison in
+        # a dedicated env via tools/check_mergekit_parity.py.
         "torch>=2.4",
         "numpy",
         "pytest",
