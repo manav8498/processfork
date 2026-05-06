@@ -174,8 +174,32 @@ fn walk_size(dir: &std::path::Path) -> u64 {
     total
 }
 
+/// HF adapter shape sanity-check. Without an HF token the live adapter
+/// can still call into resolve()/exists() against an unreachable
+/// endpoint and return a Backend error (not a panic). Live round-trip
+/// coverage lives in `hf_round_trip.rs` against a wiremock server.
+#[cfg(feature = "hf-live")]
 #[tokio::test]
-async fn hf_adapter_returns_unsupported_in_default_build() {
+async fn hf_adapter_no_token_pull_errors_cleanly() {
+    let reg = HfRegistry::new(None).with_endpoint("http://127.0.0.1:1");
+    let r = reg
+        .pull(&ImageRef::Hf {
+            user: "x".into(),
+            repo: "y".into(),
+            tag: None,
+        })
+        .await
+        .unwrap_err();
+    // No panic, no UnsupportedScheme — clean Backend error from the
+    // unreachable endpoint.
+    assert!(matches!(r, RegistryError::Backend(_)));
+}
+
+/// In a build without `hf-live`, the adapter still returns
+/// UnsupportedScheme so callers get a clear migration message.
+#[cfg(not(feature = "hf-live"))]
+#[tokio::test]
+async fn hf_adapter_returns_unsupported_when_feature_off() {
     let reg = HfRegistry::new(None);
     let r = reg
         .pull(&ImageRef::Hf {

@@ -12,13 +12,14 @@ authors.workspace = true
 workspace = true
 
 [features]
-default = []
-# Activates the live HF / S3 / IPFS adapter HTTP code. Off by default
-# so the build-host test runs against the FileRegistry without pulling
-# heavy network deps.
-hf-live   = ["dep:reqwest"]
+# HF / S3 / IPFS / OCI live HTTP code is on by default in v1.0.2;
+# v1.0.1 had it gated. Disable with `--no-default-features` for fully
+# air-gapped builds that only want the FileRegistry.
+default = ["hf-live", "s3-live", "ipfs-live", "oci-live"]
+hf-live   = ["dep:reqwest", "dep:base64"]
 s3-live   = ["dep:reqwest"]
 ipfs-live = ["dep:reqwest"]
+oci-live  = ["dep:reqwest", "dep:base64"]
 
 [dependencies]
 pf-core    = { workspace = true }
@@ -29,6 +30,7 @@ tracing    = { workspace = true }
 tokio      = { workspace = true }
 async-trait = "0.1"
 reqwest    = { workspace = true, optional = true }
+base64     = { workspace = true, optional = true }
 zstd       = { workspace = true }
 sha2       = { workspace = true }
 hex        = { workspace = true }
@@ -38,3 +40,4 @@ ring       = { workspace = true }
 tempfile   = { workspace = true }
 tokio      = { workspace = true }
 walkdir    = "2.5"
+wiremock   = { workspace = true }
