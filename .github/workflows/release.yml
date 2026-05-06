@@ -175,11 +175,13 @@ jobs:
       - uses: softprops/action-gh-release@v2
         with:
           body_path: release-notes.md
+          fail_on_unmatched_files: false
+          # Non-overlapping globs only — the `pf-*` glob already covers
+          # the .sig/.crt/.sha256 sidecars; listing them separately
+          # double-uploaded each asset and tripped the action's
+          # metadata-update endpoint.
           files: |
-            artifacts/**/pf-*
-            artifacts/**/pf-*.sig
-            artifacts/**/pf-*.crt
-            artifacts/**/pf-*.sha256
+            artifacts/pf-*/pf-*
             artifacts/wheels-*/*.whl
             artifacts/napi-*/*.node
 
