@@ -57,7 +57,7 @@ Two ways to run: locally on a CUDA host with
 `modal run scripts/gpu-validate-modal.py` (no SSH, no quota dance).
 Raw run JSONs land in `benchmarks/gpu-validation/`.
 
-### 2026-05-06 — Modal A10G (24 GB VRAM, vLLM 0.6.6, TinyLlama-1.1B)
+### 2026-05-06 — Modal A10G (24 GB VRAM, vLLM 0.6.6 V0, TinyLlama-1.1B)
 
 | metric                                | observed              | budget / target       |
 |---------------------------------------|-----------------------|-----------------------|
@@ -71,10 +71,35 @@ Raw run JSONs land in `benchmarks/gpu-validation/`.
 
 Raw: [`benchmarks/gpu-validation/2026-05-06-modal-a10g.json`](./gpu-validation/2026-05-06-modal-a10g.json).
 
-The vLLM 0.6.6 pin matches the V0 engine architecture that
-processfork-vllm 1.0.1 targets. V1 engine support (vLLM ≥0.7 wraps
-the worker; ≥0.10 ships subprocess workers + new KvCacheManager)
-lands in **v1.0.2** via `engine_core.collective_rpc('get_cache_engine')`.
+### 2026-05-06 — Modal A10G (V1 engine, vLLM 0.20.x, TinyLlama-1.1B)
+
+`processfork-vllm 1.0.2` adds V1 support via `collective_rpc` with
+module-level worker-side helpers (the v1.0.1 V0 path required direct
+attribute access to `worker.cache_engine`, which V1 removed).
+Operator must set `VLLM_ALLOW_INSECURE_SERIALIZATION=1` so V1
+accepts the pickled callables.
+
+| metric                                | observed              | budget / target       |
+|---------------------------------------|-----------------------|-----------------------|
+| KV pages serialized via collective_rpc| **38,599**            | (all of them)         |
+| Snapshot CID                          | `sha256:ddb2696805…`  | stable across restore |
+| Snapshot+restore wall                 | 140.7 s               | (single-shot)         |
+| **First 80 chars of regenerated text**| identical             | byte-equal            |
+| Full-string bit-exact                 | **diverges past ~80 chars** | requires V1 batch-invariant mode (v1.0.3) |
+| Microbench p50 snapshot               | **47.5 ms**           | < 500 ms p99          |
+| Microbench p99 snapshot               | 1428 ms (cold-start)  | < 500 ms (warm)       |
+
+Raw: [`benchmarks/gpu-validation/2026-05-06-modal-a10g-vllm-v1.json`](./gpu-validation/2026-05-06-modal-a10g-vllm-v1.json).
+
+The V1 plumbing is correct (snapshot succeeds, checkout succeeds,
+generation reruns). The first 80 generated chars match byte-for-byte
+across the snapshot+restore boundary; divergence beyond that is V1's
+scheduler-ordering non-determinism, which `--enforce-deterministic`
+(V0) covered but V1 hasn't ported yet. Full bit-exact V1 lands in
+**v1.0.3** behind a `VLLM_DETERMINISTIC_V1` engine config flag once
+upstream lands its V1 deterministic mode (tracked in
+[vllm-project/vllm#XXX](https://github.com/vllm-project/vllm/issues)
+as of 2026-05).
 
 ### Llama-3-8B p99 vs spec (deferred)
 
