@@ -123,10 +123,21 @@ def run_one(
     )
 
 
-def echo_model(prompt: str, max_tokens: int) -> str:
-    """Trivial reference model — echoes the prompt. For self-test only."""
-    del max_tokens
-    return prompt
+try:
+    from .model_clients import load as load_model
+    from .model_clients import echo_model
+except ImportError:  # support `python harness.py …` invocation
+    import importlib.util
+    import sys
+    _here = Path(__file__).parent
+    _spec = importlib.util.spec_from_file_location(
+        "_pfbench_clients", _here / "model_clients.py"
+    )
+    _mod = importlib.util.module_from_spec(_spec)
+    _spec.loader.exec_module(_mod)
+    sys.modules["_pfbench_clients"] = _mod
+    load_model = _mod.load
+    echo_model = _mod.echo_model
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -153,13 +164,10 @@ def main(argv: list[str] | None = None) -> int:
     else:
         tasks = load_tasks(args.tasks_jsonl)
 
-    if args.model == "echo":
-        model = echo_model
-    else:
-        # Real model loaders live in the operator's lab; here we only
-        # support the echo self-test so the harness is testable in CI
-        # without API keys.
-        print(f"unsupported --model {args.model!r}; only `echo` ships in v1", file=sys.stderr)
+    try:
+        model = load_model(args.model)
+    except (RuntimeError, ValueError) as e:
+        print(f"model loader failed: {e}", file=sys.stderr)
         return 64
 
     args.out.parent.mkdir(parents=True, exist_ok=True)
