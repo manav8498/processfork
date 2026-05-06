@@ -40,6 +40,17 @@ image = (
     )
 )
 
+# Default to an ungated model so the script works out-of-the-box. To run
+# against a HuggingFace-gated model (e.g. Llama-3.2-1B) instead, set
+# PF_VALIDATE_MODEL=meta-llama/Llama-3.2-1B and add a Modal secret named
+# `huggingface` containing HF_TOKEN, then add
+# secrets=[modal.Secret.from_name("huggingface")] to the @app.function below.
+import os as _os
+DEFAULT_MODEL = _os.environ.get(
+    "PF_VALIDATE_MODEL",
+    "TinyLlama/TinyLlama-1.1B-Chat-v1.0",  # ungated, ~1.1B params, ~2.2 GB
+)
+
 app = modal.App("processfork-gpu-validate", image=image)
 
 
@@ -83,10 +94,22 @@ def validate() -> dict:
         from vllm import LLM, SamplingParams
         from processfork_vllm import VllmCachePager, build_endpoints
         t0 = time.time()
-        llm = LLM(model="meta-llama/Llama-3.2-1B", enforce_eager=True,
+        # Default model is TinyLlama (ungated). Override via PF_VALIDATE_MODEL.
+        model_name = os.environ.get(
+            "PF_VALIDATE_MODEL",
+            "TinyLlama/TinyLlama-1.1B-Chat-v1.0",
+        )
+        llm = LLM(model=model_name, enforce_eager=True,
                   gpu_memory_utilization=0.7)
-        pager = VllmCachePager(engine=llm.llm_engine, n_layers=16,
-                               n_heads=32, head_dim=64)
+        # TinyLlama and Llama-3.2-1B both have 22 layers / 32 heads / 64 head_dim
+        # for the K projections; the values are read from the engine for safety.
+        cfg = llm.llm_engine.model_config.hf_config
+        pager = VllmCachePager(
+            engine=llm.llm_engine,
+            n_layers=getattr(cfg, "num_hidden_layers", 16),
+            n_heads=getattr(cfg, "num_attention_heads", 32),
+            head_dim=getattr(cfg, "hidden_size", 2048) // max(1, getattr(cfg, "num_attention_heads", 32)),
+        )
         eps = build_endpoints(pager)
         prompt = ("ProcessFork is to AI agents what git is to source code, "
                   "because")
@@ -100,6 +123,7 @@ def validate() -> dict:
         t.update(
             ok=True,
             bit_exact=(out_a == out_b),
+            model=model_name,
             snapshot_cid=snap["cid"],
             n_pages=snap.get("n_pages", 0),
             wall_seconds=round(time.time() - t0, 2),
