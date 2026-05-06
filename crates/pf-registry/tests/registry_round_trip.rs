@@ -252,8 +252,25 @@ async fn s3_adapter_returns_unsupported_when_feature_off() {
     assert!(matches!(r, RegistryError::UnsupportedScheme(_)));
 }
 
+/// Live IPFS build (default since v1.0.2). Without a reachable Kubo
+/// daemon the call returns a Backend error; real round-trip coverage
+/// lives in `ipfs_round_trip.rs`.
+#[cfg(feature = "ipfs-live")]
 #[tokio::test]
-async fn ipfs_adapter_returns_unsupported_in_default_build() {
+async fn ipfs_adapter_no_daemon_pull_errors_cleanly() {
+    let reg = IpfsRegistry::new("http://127.0.0.1:1".into());
+    let r = reg
+        .pull(&ImageRef::Ipfs { cid: "bafy".into() })
+        .await
+        .unwrap_err();
+    assert!(matches!(r, RegistryError::Backend(_)));
+}
+
+/// In a build without `ipfs-live`, the adapter still returns
+/// UnsupportedScheme so callers get a clear migration message.
+#[cfg(not(feature = "ipfs-live"))]
+#[tokio::test]
+async fn ipfs_adapter_returns_unsupported_when_feature_off() {
     let reg = IpfsRegistry::new("http://127.0.0.1:5001".into());
     let r = reg
         .pull(&ImageRef::Ipfs { cid: "bafy".into() })

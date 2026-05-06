@@ -114,7 +114,7 @@ criterion = { version = "0.5", features = ["html_reports"] }
 nix = { version = "0.29", features = ["fs", "process", "user"] }
 
 # HTTP
-reqwest = { version = "0.12", features = ["json", "stream", "rustls-tls"], default-features = false }
+reqwest = { version = "0.12", features = ["json", "stream", "rustls-tls", "multipart"], default-features = false }
 # base64 — needed by the HF Hub adapter to encode blob bodies in the
 # multi-file commit endpoint (HF's NDJSON commit API requires base64).
 base64 = "0.22"
