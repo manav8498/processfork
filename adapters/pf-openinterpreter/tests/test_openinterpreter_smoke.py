@@ -63,6 +63,50 @@ def test_run_taps_ledger(tmp_path: Path) -> None:
     assert w._ledger[0]["side_effect_class"] == "irreversible"
 
 
+def test_run_result_hash_distinguishes_outputs_past_truncation(tmp_path: Path) -> None:
+    """v1.0.5 audit: hashing happened on the truncated string, so two
+    outputs with identical first 8 KiB collided. v1.0.6 hashes the
+    full bytes at record time, then truncates the displayed copy
+    only.
+
+    We force the FakeInterpreter to emit two strings that share the
+    first 8 KiB but diverge in the trailing bytes; result_hash must
+    differ.
+    """
+
+    class BigOutInterpreter:
+        def __init__(self, suffix: str) -> None:
+            self.messages: list[dict[str, str]] = []
+            self._suffix = suffix
+            self.computer = self  # we expose run() directly
+            self._calls = 0
+
+        def run(self, language: str, code: str) -> str:
+            self._calls += 1
+            return ("X" * 9000) + self._suffix
+
+    a = BigOutInterpreter(suffix="A")
+    wa = wrap_interpreter(a, store=tmp_path / "a", fs_root=tmp_path / "fa")
+    (tmp_path / "fa").mkdir()
+    wa.run("bash", "big A")
+
+    b = BigOutInterpreter(suffix="DIFFERENT-TAIL-B")
+    wb = wrap_interpreter(b, store=tmp_path / "b", fs_root=tmp_path / "fb")
+    (tmp_path / "fb").mkdir()
+    wb.run("bash", "big B")
+
+    ha = wa._ledger[0]["result_hash"]
+    hb = wb._ledger[0]["result_hash"]
+    assert ha.startswith("sha256:") and hb.startswith("sha256:")
+    assert ha != hb, (
+        "result_hash must hash the FULL output, not the 8KiB-truncated display copy"
+    )
+
+    # Sanity: the displayed `result` IS truncated (so the ledger
+    # stays small) and its truncation suffix advertises the size.
+    assert "[truncated" in wa._ledger[0]["result"]
+
+
 def test_snapshot_then_checkout_round_trip(tmp_path: Path) -> None:
     sandbox = tmp_path / "sandbox"
     sandbox.mkdir()

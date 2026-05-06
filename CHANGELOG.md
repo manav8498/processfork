@@ -4,6 +4,44 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.0.6] — 2026-05-06
+
+Closes 2 follow-up findings from the v1.0.5 audit (round 4).
+
+### Correctness fixes
+
+- **OpenInterpreter `result_hash` collision** (real bug). v1.0.5
+  truncated the result string to 8 KiB BEFORE computing the hash,
+  so two large outputs that diverged past byte 8192 collided.
+  Fixed: `run()` now serializes the FULL output once, hashes those
+  bytes (storing the hash in the ledger entry), and truncates only
+  the displayed `result` field. The truncation suffix advertises
+  the dropped byte count. Snapshot path prefers the pre-computed
+  `result_hash`. 1 regression test that constructs two outputs
+  sharing the first 9 KiB but diverging in the tail.
+
+- **`--resume-cmd` not running on quiesce-cmd failure**. v1.0.5's
+  `QuiesceGuard` only stashed `resume_cmd` after a successful
+  `quiesce_cmd` run, so a partial-failure quiesce (mutates app
+  state, then fails) left the agent stuck in a half-quiesced state.
+  Fixed: construct the guard FIRST (owns `resume_cmd`), THEN run
+  `quiesce_cmd` — Rust's stack-unwind drop fires resume on the
+  error-return path. Updated error message tells the operator
+  resume will still run. 1 regression test verifies that a quiesce
+  that touches a file then exit 7 still runs resume.
+
+### Versions
+
+- `processfork` (Rust + Python wheel): 1.0.5 → **1.0.6**
+- `processfork-openinterpreter`: 1.0.2 → **1.0.3** (hash-before-truncate)
+- `@processfork/sdk` (npm): 1.0.6 → **1.0.7**
+- 8 Rust crates on crates.io: all → **1.0.6**
+
+### Test count
+
+196 → 197 cargo tests workspace-wide (+1 quiesce-failure regression).
+Plus +1 OI prefix-collision regression in adapters.
+
 ## [1.0.5] — 2026-05-06
 
 Closes 4 follow-up findings from the v1.0.4 audit (round 3).

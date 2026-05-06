@@ -6,7 +6,7 @@ build-backend = "maturin"
 name = "processfork"
 # Keep in sync with workspace.package.version in /Cargo.toml — maturin
 # reads the wheel version from here, not from Cargo.toml.
-version = "1.0.5"
+version = "1.0.6"
 description = "fork() for AI agents — snapshot, branch, and merge live agent state."
 readme = "../../README.md"
 license = { text = "MIT" }

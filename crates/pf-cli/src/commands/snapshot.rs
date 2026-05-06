@@ -376,23 +376,35 @@ impl Drop for PauseGuard {
 }
 
 /// RAII guard that runs `quiesce_cmd` on construction and
-/// `resume_cmd` on Drop. Either side may be `None` (no-op). Always
-/// runs the resume side — even if the body errors mid-capture — so
-/// the agent never gets stuck in a quiesced state.
+/// `resume_cmd` on Drop. Either side may be `None` (no-op).
 ///
-/// v1.0.5 audit fix for the "SIGSTOP doesn't bracket app-level
-/// transactions" finding.
+/// v1.0.6 audit fix: resume_cmd is stashed in the guard BEFORE
+/// quiesce_cmd runs, so a partial-failure quiesce — which can
+/// already have mutated app state (e.g. set a sentinel flag, then
+/// failed before flushing) — still triggers resume_cmd via Drop on
+/// the error-return path. Without this, an operator who wires a
+/// quiesce-cmd that fails halfway leaves their agent stuck in a
+/// half-quiesced state.
 struct QuiesceGuard {
     resume_cmd: Option<String>,
 }
 
 impl QuiesceGuard {
     fn run(quiesce: Option<&str>, resume: Option<String>) -> anyhow::Result<Self> {
+        // CRITICAL ORDERING: construct the guard FIRST so its Drop
+        // owns `resume`. If `run_shell(quiesce)?` errors below, the
+        // function returns Err and Rust drops `guard` on the way
+        // out, which fires Drop, which runs resume_cmd. So the
+        // resume runs regardless of whether quiesce succeeded.
+        let guard = Self { resume_cmd: resume };
         if let Some(cmd) = quiesce {
-            run_shell(cmd)
-                .map_err(|e| CliError::BadInput(format!("--quiesce-cmd {cmd:?} failed: {e}")))?;
+            run_shell(cmd).map_err(|e| {
+                CliError::BadInput(format!(
+                    "--quiesce-cmd {cmd:?} failed: {e} (--resume-cmd will still run)"
+                ))
+            })?;
         }
-        Ok(Self { resume_cmd: resume })
+        Ok(guard)
     }
 }
 

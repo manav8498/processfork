@@ -406,6 +406,35 @@ fn snapshot_failing_quiesce_cmd_aborts_snapshot() {
         .stderr(contains("--quiesce-cmd"));
 }
 
+/// v1.0.6 audit: when --quiesce-cmd fails AFTER it's already mutated
+/// app state, --resume-cmd must still run so the operator's app
+/// doesn't get stuck in a half-quiesced state.
+#[test]
+fn snapshot_failing_quiesce_still_runs_resume() {
+    let store = TempDir::new().unwrap();
+    let sandbox = TempDir::new().unwrap();
+    make_sandbox(sandbox.path());
+    let scratch = TempDir::new().unwrap();
+    let flag = scratch.path().join("flag.set");
+    let resume_marker = scratch.path().join("resume.ran");
+    pf(store.path())
+        .args(["snapshot", "--agent-id", "t", "--fs-root"])
+        .arg(sandbox.path())
+        .args(["--quiesce-cmd"])
+        // Quiesce: touch a sentinel flag (simulates partial state
+        // mutation) THEN exit 7 (simulates a downstream failure).
+        .arg(format!("touch {} && exit 7", flag.display()))
+        .args(["--resume-cmd"])
+        .arg(format!("touch {}", resume_marker.display()))
+        .assert()
+        .failure(); // snapshot itself fails
+    assert!(flag.exists(), "quiesce-cmd partial state should remain");
+    assert!(
+        resume_marker.exists(),
+        "--resume-cmd must run even when --quiesce-cmd fails"
+    );
+}
+
 /// v1.0.4 audit (round 2): --trace-from-jsonl validated path
 /// existence + is_file but accepted invalid JSON content. Now we
 /// parse each non-empty line as `{"role": str, "content": str}` and

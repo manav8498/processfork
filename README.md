@@ -109,7 +109,7 @@ Identical content shares storage automatically — 12 parallel forks use **~1.5�
 
 ## Status
 
-`v1.0.5` tagged. Closes 4 follow-up audit findings (round 3): the npm package now ships its native binary at the package root (was a hard install blocker for `@processfork/sdk@≤1.0.5` — first installable npm version is **1.0.6**); OpenInterpreter ledger entries now include `result_hash`; `--quiesce-cmd` / `--resume-cmd` give the operator an app-level transaction-boundary hook (paired with `--pause-pid` for OS-level pause); `_pf_py.pyi` matches the runtime signature including `effects`. v1.0.3 [security advisories](./SECURITY.md) remain in force.
+`v1.0.6` tagged. Closes 2 round-4 audit findings: OpenInterpreter `result_hash` now hashes the FULL output before truncating the displayed copy (v1.0.5 hashed the truncated string, so two large outputs sharing a prefix collided); `--resume-cmd` now runs even when `--quiesce-cmd` fails partway through (RAII Drop ordering — guard owns resume before quiesce runs, so the error-return path fires resume). v1.0.3 [security advisories](./SECURITY.md) remain in force.
 
 | metric                                                 | observed                 | target           |
 |--------------------------------------------------------|--------------------------|------------------|
