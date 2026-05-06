@@ -72,18 +72,21 @@ jobs:
   # 5-platform coverage (the four PyPI cares about plus Linux aarch64):
   # macOS arm64, macOS x86_64, Linux x86_64, Linux aarch64, Windows x86_64.
   # cp39-abi3 single-wheel-per-arch (we use pyo3 abi3-py39).
-  build-py:
+  #
+  # Linux jobs use PyO3/maturin-action so maturin runs inside the
+  # official manylinux_2_28 Docker image (Ubuntu 24's native glibc is
+  # 2.39 — too new to satisfy manylinux_2_28 directly).
+  # macOS + Windows build natively; no manylinux constraint applies.
+  build-py-native:
     name: python wheel / ${{ matrix.target }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          - { os: macos-14,         target: aarch64-apple-darwin,   args: "" }
-          - { os: macos-14,         target: x86_64-apple-darwin,    args: "" }
-          - { os: ubuntu-24.04,     target: x86_64-unknown-linux-gnu, args: "--manylinux 2_28" }
-          - { os: ubuntu-24.04-arm, target: aarch64-unknown-linux-gnu, args: "--manylinux 2_28" }
-          - { os: windows-2022,     target: x86_64-pc-windows-msvc, args: "" }
+          - { os: macos-14,     target: aarch64-apple-darwin }
+          - { os: macos-14,     target: x86_64-apple-darwin }
+          - { os: windows-2022, target: x86_64-pc-windows-msvc }
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@1.88
@@ -100,7 +103,30 @@ jobs:
             --target ${{ matrix.target }} \
             -m crates/pf-py/Cargo.toml \
             --features extension-module \
-            --strip ${{ matrix.args }}
+            --strip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheels-${{ matrix.target }}
+          path: target/wheels/
+
+  build-py-linux:
+    name: python wheel / ${{ matrix.target }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { runner: ubuntu-24.04,     target: x86_64-unknown-linux-gnu }
+          - { runner: ubuntu-24.04-arm, target: aarch64-unknown-linux-gnu }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: PyO3/maturin-action@v1
+        with:
+          target: ${{ matrix.target }}
+          manylinux: "2_28"
+          rust-toolchain: "1.88"
+          working-directory: crates/pf-py
+          args: --release --features extension-module --strip --out ../../target/wheels
       - uses: actions/upload-artifact@v4
         with:
           name: wheels-${{ matrix.target }}
@@ -135,7 +161,7 @@ jobs:
   # ----------------- GitHub Release + cosign -----------------
   release:
     name: github release
-    needs: [build-cli, build-py, build-ts]
+    needs: [build-cli, build-py-native, build-py-linux, build-ts]
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
