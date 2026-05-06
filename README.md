@@ -109,7 +109,7 @@ Identical content shares storage automatically — 12 parallel forks use **~1.5�
 
 ## Status
 
-`v1.0.7` tagged. Closes 4 of 5 round-5 audit blockers: env capture redacts secret-shaped names by default (no more leaks if operator forgets `--scrub-env`); ledger writes now go through real `pf_effects::Ledger::append` HMAC chaining + `pf verify` validates the chain (was the ACRFence claim's biggest gap); vLLM/SGLang plugins actually write K/V page bytes + manifest to the store and read them back on checkout (v1.0.6 returned a CID that pointed at nothing); versions aligned across surfaces. Round-5's 5th finding (cargo-audit ignores on `pyo3 0.22` + `rustls-webpki 0.101`) is tracked for v1.0.8.
+`v1.0.8` tagged. Closes the **5th and final** round-5 audit blocker: cargo-audit ignore list dropped from 5 IDs → 1 (and that one is a stylistic warning on a transitive progress-bar dep). Concretely: pyo3 0.22 → 0.24 retires `RUSTSEC-2025-0020`, and switching `aws-config` / `aws-sdk-s3` from the legacy `rustls` feature to `default-https-client` retires `RUSTSEC-2026-0098/0099/0104` (rustls 0.21 → 0.23, rustls-webpki 0.101 → 0.103). `cargo deny check` reports `advisories ok, bans ok, licenses ok, sources ok`. v1.0.7's other four round-5 fixes still apply: env capture redacts secret-shaped names by default; ledger writes go through real `pf_effects::Ledger::append` HMAC chaining + `pf verify` validates the chain; vLLM/SGLang plugins actually write K/V page bytes + manifest to the store and read them back on checkout; versions aligned across surfaces.
 
 | metric                                                 | observed                 | target           |
 |--------------------------------------------------------|--------------------------|------------------|

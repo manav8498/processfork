@@ -31,7 +31,7 @@ default-members = [
 ]
 
 [workspace.package]
-version = "1.0.7"
+version = "1.0.8"
 edition = "2024"
 # MSRV bumps:
 #   1.85 → 1.88: the `home` crate (transitive via cargo-internals)
@@ -60,13 +60,13 @@ doc_markdown = "allow"
 
 [workspace.dependencies]
 # Internal crates
-pf-core    = { path = "crates/pf-core",    version = "1.0.7" }
-pf-model   = { path = "crates/pf-model",   version = "1.0.7" }
-pf-cache   = { path = "crates/pf-cache",   version = "1.0.7" }
-pf-world   = { path = "crates/pf-world",   version = "1.0.7" }
-pf-effects = { path = "crates/pf-effects", version = "1.0.7" }
-pf-merge   = { path = "crates/pf-merge",   version = "1.0.7" }
-pf-registry= { path = "crates/pf-registry",version = "1.0.7" }
+pf-core    = { path = "crates/pf-core",    version = "1.0.8" }
+pf-model   = { path = "crates/pf-model",   version = "1.0.8" }
+pf-cache   = { path = "crates/pf-cache",   version = "1.0.8" }
+pf-world   = { path = "crates/pf-world",   version = "1.0.8" }
+pf-effects = { path = "crates/pf-effects", version = "1.0.8" }
+pf-merge   = { path = "crates/pf-merge",   version = "1.0.8" }
+pf-registry= { path = "crates/pf-registry",version = "1.0.8" }
 
 # Async runtime
 tokio = { version = "1.41", features = ["full"] }
@@ -125,8 +125,15 @@ wiremock = "0.6"
 # AWS S3 SDK — used by the s3:// registry adapter for real SigV4 +
 # multi-region + R2/MinIO compatibility. Justified per megaprompt §7
 # ("S3: aws-sdk-s3.").
-aws-sdk-s3 = { version = "1.74", default-features = false, features = ["rt-tokio", "rustls"] }
-aws-config = { version = "1.5", default-features = false, features = ["rt-tokio", "rustls", "behavior-version-latest"] }
+# Note: the `rustls` feature on aws-sdk-s3 / aws-config activates
+# `aws-smithy-runtime/tls-rustls`, which in turn activates
+# `aws-smithy-http-client?/legacy-rustls-ring` — pulling in rustls 0.21 +
+# rustls-webpki 0.101 (RUSTSEC-2026-0098/0099/0104). The replacement
+# `default-https-client` feature wires the modern rustls 0.23 + aws-lc-rs
+# stack via `aws-smithy-http-client?/rustls-aws-lc`, which has no
+# outstanding advisories. (Verified v1.0.8.)
+aws-sdk-s3 = { version = "1.74", default-features = false, features = ["rt-tokio", "default-https-client"] }
+aws-config = { version = "1.5", default-features = false, features = ["rt-tokio", "default-https-client", "behavior-version-latest"] }
 aws-credential-types = "1.2"
 aws-smithy-runtime-api = "1.7"
 
@@ -138,7 +145,7 @@ futures-util = { version = "0.3", default-features = false }
 # Bindings
 # `extension-module` is opt-in per-crate (pf-py turns it on under the
 # `extension-module` feature so `cargo test` can still link libpython).
-pyo3 = { version = "0.22", features = ["abi3-py39", "generate-import-lib"] }
+pyo3 = { version = "0.24", features = ["abi3-py39", "generate-import-lib"] }
 napi = { version = "2.16", features = ["napi8", "tokio_rt"] }
 napi-derive = "2.16"
 

@@ -366,7 +366,7 @@ pub fn read_blob<'py>(
     let d = parse_cid(&digest)?;
     let blobs: Arc<dyn BlobStore> = store.inner.blobs_arc();
     let bytes = blobs.get(&d).map_err(map_err)?;
-    Ok(pyo3::types::PyBytes::new_bound(py, &bytes))
+    Ok(pyo3::types::PyBytes::new(py, &bytes))
 }
 
 /// Store `bytes` content-addressed; returns the resulting digest as
@@ -380,35 +380,41 @@ pub fn put_blob(store: &PyPfStore, bytes: Vec<u8>) -> PyResult<String> {
 }
 
 fn json_value_to_py(py: Python<'_>, v: &serde_json::Value) -> PyResult<PyObject> {
+    // pyo3 0.24: `IntoPy::into_py` is deprecated in favour of
+    // `IntoPyObject::into_pyobject(...)?.unbind().into_any()`. The
+    // `.into_pyobject(py)` returns a `Bound<'py, T>` (or its Result);
+    // `.into_any()` widens to `Bound<'py, PyAny>`; `.unbind()` strips
+    // the lifetime to give us an owned `Py<PyAny>` (= `PyObject`).
+    use pyo3::IntoPyObject;
     use serde_json::Value;
     Ok(match v {
         Value::Null => py.None(),
-        Value::Bool(b) => b.into_py(py),
+        Value::Bool(b) => b.into_pyobject(py)?.to_owned().into_any().unbind(),
         Value::Number(n) => {
             if let Some(i) = n.as_i64() {
-                i.into_py(py)
+                i.into_pyobject(py)?.into_any().unbind()
             } else if let Some(u) = n.as_u64() {
-                u.into_py(py)
+                u.into_pyobject(py)?.into_any().unbind()
             } else if let Some(f) = n.as_f64() {
-                f.into_py(py)
+                f.into_pyobject(py)?.into_any().unbind()
             } else {
                 py.None()
             }
         }
-        Value::String(s) => s.into_py(py),
+        Value::String(s) => s.into_pyobject(py)?.into_any().unbind(),
         Value::Array(arr) => {
-            let list = PyList::empty_bound(py);
+            let list = PyList::empty(py);
             for item in arr {
                 list.append(json_value_to_py(py, item)?)?;
             }
-            list.into_py(py)
+            list.into_any().unbind()
         }
         Value::Object(obj) => {
-            let dict = PyDict::new_bound(py);
+            let dict = PyDict::new(py);
             for (k, val) in obj {
                 dict.set_item(k, json_value_to_py(py, val)?)?;
             }
-            dict.into_py(py)
+            dict.into_any().unbind()
         }
     })
 }
@@ -440,7 +446,7 @@ pub fn merge(
     let report = pf_merge::merge(store.inner.as_ref(), &a, &b, &StubSummarizer, &opts, None)
         .map_err(map_merge_err)?;
 
-    let dict = PyDict::new_bound(py);
+    let dict = PyDict::new(py);
     dict.set_item("merged_cid", report.merged_cid.as_str())?;
     dict.set_item("ancestor", report.ancestor.as_str())?;
     dict.set_item(
@@ -451,9 +457,9 @@ pub fn merge(
             pf_merge::MergeOutcome::Skipped => "skipped",
         },
     )?;
-    let conflicts = PyList::empty_bound(py);
+    let conflicts = PyList::empty(py);
     for c in &report.world.conflicts {
-        let cd = PyDict::new_bound(py);
+        let cd = PyDict::new(py);
         cd.set_item("path", &c.path)?;
         cd.set_item("a_digest", c.a_digest.as_str())?;
         cd.set_item("b_digest", c.b_digest.as_str())?;
@@ -466,7 +472,7 @@ pub fn merge(
         "model_applied_task_arithmetic",
         report.model.applied_task_arithmetic,
     )?;
-    Ok(dict.into_py(py))
+    Ok(dict.into_any().unbind())
 }
 
 // ----------------------- module init -----------------------

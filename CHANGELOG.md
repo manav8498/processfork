@@ -4,6 +4,47 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.0.8] — 2026-05-06
+
+Closes the **5th and final** finding from the v1.0.6 audit — every
+round-5 production-blocker is now resolved end-to-end.
+
+### Security: cargo-audit advisory ignores cleared
+
+- **pyo3 0.22 → 0.24** (`RUSTSEC-2025-0020`, PyString::from_object
+  buffer-overflow). The `IntoPy::into_py` API is deprecated in 0.24;
+  `pf-py`'s json↔PyObject converter and the `merge` report
+  constructor were migrated to `IntoPyObject::into_pyobject(...)?
+  .into_any().unbind()`. Builds clean under `cargo clippy --workspace
+  --all-targets -- -D warnings`.
+- **rustls-webpki 0.101.7 → 0.103.13** (`RUSTSEC-2026-0098`,
+  `-0099`, `-0104`). Root cause was the `rustls` feature on
+  `aws-config` / `aws-sdk-s3`, which routes through
+  `aws-smithy-runtime/tls-rustls` →
+  `aws-smithy-http-client/legacy-rustls-ring` and pins rustls 0.21.
+  Switched to the `default-https-client` feature, which routes
+  through `aws-smithy-http-client/rustls-aws-lc` (rustls 0.23 +
+  aws-lc-rs). `cargo tree -i rustls-webpki` now lists only `0.103.13`
+  — no more legacy rustls in the dep tree.
+- `deny.toml` ignore list dropped from 5 IDs → 1 (only the unrelated
+  `RUSTSEC-2025-0119` for `number_prefix` unmaintained-warning
+  remains, transitive via `indicatif`'s progress bars). `cargo deny
+  check` reports `advisories ok, bans ok, licenses ok, sources ok`.
+
+### Versions
+
+- `processfork` (Rust + Python wheel): 1.0.7 → **1.0.8**
+- All 8 internal `pf-*` crate version pins: → 1.0.8
+- npm `@processfork/sdk` was already at 1.0.8 from the prior cycle.
+
+### Why this matters
+
+v1.0.7 shipped with a footnote: "round-5 finding #4 tracked for
+v1.0.8." That note is gone. `cargo deny check advisories` now passes
+without any RUSTSEC ignores in the AWS / pyo3 chains; the only
+remaining ignore is a stylistic warning on a transitive progress-bar
+dependency.
+
 ## [1.0.7] — 2026-05-06
 
 Closes 4 of 5 production-blocker findings from the v1.0.6 audit

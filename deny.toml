@@ -6,38 +6,20 @@ db-path = "~/.cargo/advisory-db"
 db-urls = ["https://github.com/RustSec/advisory-db"]
 yanked = "warn"
 ignore = [
-    # pyo3 0.22.x has a buffer-overflow risk in PyString::from_object
-    # (https://rustsec.org/advisories/RUSTSEC-2025-0020). pf-py NEVER
-    # calls PyString::from_object directly — we only use wrap_pyfunction!
-    # and PyDict::new_bound. Tracked for v1.0.1: bump to pyo3 0.24+
-    # (which requires reworking the #[pymodule] signature + Bound API
-    # tightening). Inventoried in claude-progress.json under
-    # `architecture_concerns[]`.
-    "RUSTSEC-2025-0020",
-    # number_prefix is unmaintained (only used via indicatif in pf-cli).
-    # Lower-severity warning; tracked for v1.0.1 — likely indicatif
-    # itself will swap the dep before we need to.
+    # number_prefix is unmaintained (only used transitively via
+    # indicatif → pf-cli for progress bars). Lower-severity *warning*
+    # advisory (no exploit, just an "uninhabited maintainer" notice).
+    # Will drop when indicatif itself swaps the dep.
     "RUSTSEC-2025-0119",
-    # rustls-webpki 0.101.7 (transitive: aws-sdk-s3 → aws-smithy-http-client
-    # → rustls 0.21 → rustls-webpki). Three CVEs published 2026-05:
-    #
-    #   RUSTSEC-2026-0098  URI-name constraint accepted unconditionally.
-    #                      Reachable only after signature verification, and
-    #                      rustls-webpki has no public API for asserting URI
-    #                      names — we don't expose that surface.
-    #   RUSTSEC-2026-0099  Wildcard-name constraint accepted in DNS subtree.
-    #                      Same scope (signature must verify first +
-    #                      misissuance required).
-    #   RUSTSEC-2026-0104  Reachable panic in CRL parsing. We don't issue
-    #                      or verify CRLs; aws-smithy doesn't either.
-    #
-    # All fixed in rustls-webpki ≥0.103.12. We can't move the AWS dep
-    # tree to a newer rustls without aws-smithy-http-client itself
-    # bumping its rustls floor — tracked for v1.0.3 (likely arrives
-    # via aws-sdk-s3 1.135+).
-    "RUSTSEC-2026-0098",
-    "RUSTSEC-2026-0099",
-    "RUSTSEC-2026-0104",
+    # NOTE (v1.0.8): RUSTSEC-2025-0020 (pyo3 0.22 PyString::from_object
+    # buffer-overflow) is gone — pf-py is on pyo3 0.24 now.
+    # NOTE (v1.0.8): RUSTSEC-2026-0098/0099/0104 (rustls-webpki 0.101)
+    # are gone — switched aws-config / aws-sdk-s3 from the legacy
+    # `rustls` feature (→ aws-smithy-http-client/legacy-rustls-ring →
+    # rustls 0.21 / rustls-webpki 0.101) to `default-https-client`
+    # (→ aws-smithy-http-client/rustls-aws-lc → rustls 0.23 /
+    # rustls-webpki 0.103). `cargo tree -i rustls-webpki` now lists
+    # only 0.103.13.
 ]
 
 [licenses]
