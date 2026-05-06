@@ -32,7 +32,13 @@ image = (
     .pip_install(
         "processfork>=1.0.1",
         "processfork-sglang>=1.0.0",
-        "vllm>=0.6.0",
+        # Pin to vLLM 0.6.x: that's the V0 engine architecture (CacheEngine
+        # with directly-attribute-accessible gpu_cache) that processfork-vllm
+        # 1.0.1 targets. vLLM 0.7 wraps the worker once more; vLLM ≥0.10
+        # ships V1 as default (subprocess workers + new KV manager) which
+        # needs the v1.0.2 collective_rpc rewrite. Pinning here lets us
+        # prove the v1.0.1 claim end-to-end on a real GPU today.
+        "vllm==0.6.6",
         "torch>=2.4",
         "numpy",
         "pytest",
