@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "processfork-sglang"
-version = "1.0.0"
+version = "1.0.1"
 description = "ProcessFork plugin for SGLang ≥0.5 — RadixAttention prefix-share preserved across snapshot/restore."
 readme = "README.md"
 license = { text = "MIT" }

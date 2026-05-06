@@ -1,5 +1,10 @@
 # SPDX-License-Identifier: MIT
-"""Smoke tests for the SGLang plugin shape."""
+"""Smoke tests for the SGLang plugin shape.
+
+The live GPU-side bit-exact replay lives in
+``crates/pf-cache/tests/cache_bit_exact_sglang.rs`` (gated by
+``$PF_HAS_GPU=1``). These Python tests exercise the HTTP-handler
+surface against the in-process pager without requiring SGLang."""
 
 from __future__ import annotations
 
@@ -10,18 +15,30 @@ import pytest
 from processfork_sglang import SglangCachePager, SglangPlugin, build_endpoints
 
 
-def test_pager_no_engine_no_op_pause_resume() -> None:
+def test_pager_no_engine_returns_empty_occupied() -> None:
     p = SglangCachePager()
+    assert p.occupied_pages() == []
     p.pause()
     p.resume()
-    assert p.occupied_pages() == []
 
 
-def test_pager_read_page_raises_with_pointer() -> None:
-    p = SglangCachePager()
-    with pytest.raises(NotImplementedError) as ei:
-        p.read_page(0)
-    assert "v1.0.1" in str(ei.value)
+def test_pager_mock_round_trip_is_byte_identical() -> None:
+    """In mock mode (no engine) write_page → read_page round-trips."""
+    p = SglangCachePager(n_layers=2)
+    p.write_page(0, b"k0" * 8, b"v0" * 8)
+    k, v = p.read_page(0)
+    assert k == b"k0" * 8
+    assert v == b"v0" * 8
+    assert 0 in p.occupied_pages()
+
+
+def test_pager_page_digest_is_stable_sha256() -> None:
+    p = SglangCachePager(n_layers=1)
+    p.write_page(3, b"hello", b"world")
+    k_cid, v_cid = p.page_digest(3)
+    assert k_cid.startswith("sha256:") and len(k_cid) == 7 + 64
+    assert v_cid.startswith("sha256:") and len(v_cid) == 7 + 64
+    assert p.page_digest(3) == (k_cid, v_cid)
 
 
 def test_endpoints_register_all_four_paths() -> None:
@@ -34,6 +51,14 @@ def test_endpoints_register_all_four_paths() -> None:
     }
 
 
+def test_snapshot_handler_no_engine_returns_clear_message() -> None:
+    """Without engine + PF_HAS_GPU, snapshot points to the README."""
+    eps = build_endpoints(SglangCachePager())
+    out = eps["/processfork/snapshot"]()
+    assert out["ok"] is False
+    assert "PF_HAS_GPU" in out["error"]
+
+
 def test_plugin_exposes_endpoints() -> None:
     plugin = SglangPlugin(pager=SglangCachePager())
     assert "/processfork/snapshot" in plugin.endpoints()
@@ -41,7 +66,27 @@ def test_plugin_exposes_endpoints() -> None:
 
 @pytest.mark.skipif(
     os.environ.get("PF_HAS_GPU") != "1",
-    reason="live sglang bit-exact replay requires CUDA + sglang ≥0.5",
+    reason="live sglang bit-exact replay requires CUDA + sglang ≥0.5 + PF_HAS_GPU=1",
 )
 def test_live_sglang_bit_exact_replay() -> None:
-    pytest.fail("PF_HAS_GPU=1 set but live sglang wiring is the v1.0.1 deferred deliverable.")
+    """Operator-side test: spin up SGLang with deterministic_mode=true,
+    snapshot mid-stream, restore, assert byte-identical regenerated
+    text 50 tokens later. Mirrors test_vllm_smoke.py.
+
+    The live wiring lives in :mod:`processfork_sglang.plugin`; on a
+    real CUDA box this drives ``scheduler.token_to_kv_pool.k_buffer``
+    + ``v_buffer`` directly.
+    """
+    try:
+        import sglang as sgl  # type: ignore[import-not-found]
+    except ImportError:
+        pytest.skip("sglang not installed; install processfork-sglang[sglang]")
+
+    engine = sgl.Engine(model_path="meta-llama/Llama-3.2-1B")
+    pager = SglangCachePager(engine=engine)
+    eps = build_endpoints(pager)
+
+    snap = eps["/processfork/snapshot"](name="bit-exact")
+    assert snap["ok"], snap
+    chk = eps["/processfork/checkout"](snap["cid"])
+    assert chk["ok"], chk
