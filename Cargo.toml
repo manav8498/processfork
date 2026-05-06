@@ -33,11 +33,12 @@ default-members = [
 [workspace.package]
 version = "1.0.2"
 edition = "2024"
-# Bumped 1.85 → 1.88 because the `home` crate (a transitive dep of
-# cargo-internals reachable via several of our deps) requires 1.88;
-# discovered by `docker build .` against rust:1.85-slim. Tracked in
-# claude-progress.json/assumptions[].
-rust-version = "1.88"
+# MSRV bumps:
+#   1.85 → 1.88: the `home` crate (transitive via cargo-internals)
+#                started requiring 1.88 (discovered Phase 12, A-005).
+#   1.88 → 1.91: aws-sdk-s3 1.131.0 + aws-config 1.8.16 require 1.91.1
+#                (added in v1.0.2 for the s3:// registry adapter; A-010).
+rust-version = "1.91"
 license = "MIT"
 repository = "https://github.com/manav8498/processfork"
 homepage = "https://github.com/manav8498/processfork"
