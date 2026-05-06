@@ -1,8 +1,15 @@
 name: Release
 
 # Triggers on a tag push of the form v1.0.0 / v1.0.1 / etc.
-# Operator-supplied secrets required for the publish steps:
-#   PYPI_API_TOKEN          — PyPI account token, scoped to processfork*
+#
+# PyPI uses **Trusted Publishing** (OIDC) — no PYPI_API_TOKEN needed.
+# Operator must enable Trusted Publishing once at:
+#   https://pypi.org/manage/project/<project>/settings/publishing/
+# for processfork *and* every processfork-<adapter>, with this repo
+# (manav8498/processfork), workflow file (release.yml), and the env
+# name `pypi` as the trust anchor.
+#
+# Operator-supplied secrets required for the rest:
 #   NPM_TOKEN               — npm account token, scoped to @processfork/sdk
 #   CARGO_REGISTRY_TOKEN    — crates.io API token
 #   GHCR_TOKEN              — GHCR push token (or use GITHUB_TOKEN with packages:write)
@@ -62,28 +69,41 @@ jobs:
           path: staging/
 
   # ----------------- Python wheel matrix -----------------
+  # 5-platform coverage (the four PyPI cares about plus Linux aarch64):
+  # macOS arm64, macOS x86_64, Linux x86_64, Linux aarch64, Windows x86_64.
+  # cp39-abi3 single-wheel-per-arch (we use pyo3 abi3-py39).
   build-py:
-    name: python wheel / ${{ matrix.os }}
+    name: python wheel / ${{ matrix.target }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-24.04
-          - os: ubuntu-24.04-arm
-          - os: macos-14
+          - { os: macos-14,         target: aarch64-apple-darwin,   args: "" }
+          - { os: macos-14,         target: x86_64-apple-darwin,    args: "" }
+          - { os: ubuntu-24.04,     target: x86_64-unknown-linux-gnu, args: "--manylinux 2_28" }
+          - { os: ubuntu-24.04-arm, target: aarch64-unknown-linux-gnu, args: "--manylinux 2_28" }
+          - { os: windows-2022,     target: x86_64-pc-windows-msvc, args: "" }
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@1.88
+        with:
+          targets: ${{ matrix.target }}
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
       - run: pip install maturin
       - name: build wheel
-        run: maturin build --release -m crates/pf-py/Cargo.toml --features extension-module --strip
+        shell: bash
+        run: |
+          maturin build --release \
+            --target ${{ matrix.target }} \
+            -m crates/pf-py/Cargo.toml \
+            --features extension-module \
+            --strip ${{ matrix.args }}
       - uses: actions/upload-artifact@v4
         with:
-          name: wheels-${{ matrix.os }}
+          name: wheels-${{ matrix.target }}
           path: target/wheels/
 
   # ----------------- TypeScript napi binaries -----------------
@@ -157,42 +177,57 @@ jobs:
       - run: cargo publish -p pf-registry --token "$CARGO_REGISTRY_TOKEN"
       - run: cargo publish -p processfork     --token "$CARGO_REGISTRY_TOKEN"
 
-  # ----------------- PyPI -----------------
-  publish-pypi:
-    name: pypi
+  # ----------------- PyPI (Trusted Publishing via OIDC) -----------------
+  # No PYPI_API_TOKEN required. Operator must enable Trusted Publishing
+  # at https://pypi.org/manage/project/<project>/settings/publishing/
+  # for processfork *and* every processfork-<adapter>, with this repo
+  # (manav8498/processfork), workflow file (release.yml), and the env
+  # name `pypi` below as the trust anchor.
+  publish-pypi-core:
+    name: pypi / processfork (core wheels)
     needs: release
     runs-on: ubuntu-24.04
-    env:
-      MATURIN_PYPI_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
+    environment: pypi
+    permissions:
+      id-token: write
     steps:
-      - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           path: artifacts/
+      - name: collect every wheel into one dir
+        run: |
+          mkdir -p dist/
+          cp artifacts/wheels-*/*.whl dist/
+          ls -lh dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist/
+          skip-existing: true
+
+  publish-pypi-adapters:
+    name: pypi / processfork-${{ matrix.adapter }}
+    needs: release
+    runs-on: ubuntu-24.04
+    environment: pypi
+    permissions:
+      id-token: write
+    strategy:
+      fail-fast: false
+      matrix:
+        adapter: [claude-code, langgraph, openinterpreter, vllm, sglang, autogen, crewai]
+    steps:
+      - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: pip install maturin twine
-      # Publish the cdylib wheel for every (os, arch).
-      - run: |
-          for whl in artifacts/wheels-*/*.whl; do
-            twine upload --non-interactive "$whl"
-          done
-        env:
-          TWINE_USERNAME: __token__
-          TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
-      # Plus the per-adapter pure-Python pkgs.
-      - run: |
-          for adapter in claude-code langgraph openinterpreter vllm sglang autogen crewai; do
-            cd "adapters/pf-$adapter"
-            python -m pip install build
-            python -m build
-            twine upload --non-interactive dist/*
-            cd "$GITHUB_WORKSPACE"
-          done
-        env:
-          TWINE_USERNAME: __token__
-          TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
+      - run: pip install build
+      - name: build sdist + wheel
+        working-directory: adapters/pf-${{ matrix.adapter }}
+        run: python -m build
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: adapters/pf-${{ matrix.adapter }}/dist/
+          skip-existing: true
 
   # ----------------- npm -----------------
   publish-npm:

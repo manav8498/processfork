@@ -4,6 +4,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.0.1] — 2026-05-05
+
+Cross-platform wheels and the live vLLM bit-exact KV-cache integration.
+
+- **Wheels**: `processfork` now ships a wheel for every PyPI
+  platform tier — macOS arm64 + macOS x86_64 + Linux x86_64
+  (manylinux_2_28) + Linux aarch64 (manylinux_2_28) + Windows x86_64
+  (cross-compiled on the build host via `pyo3 = ["generate-import-lib"]`).
+- **vLLM live FFI**: `adapters/pf-vllm/processfork_vllm/plugin.py`
+  drives `vllm.worker.cache_engine.gpu_cache` for real, gated on
+  `PF_HAS_GPU=1`. Bit-exact restore against `--enforce-deterministic`
+  Llama-class workers. Mock mode (no engine) still gives a byte-
+  identical write→read round-trip for unit tests.
+- **PyPI Trusted Publishing**: `.github/workflows/release.yml`
+  replaces `PYPI_API_TOKEN` with OIDC trust to GitHub via
+  `pypa/gh-action-pypi-publish`. The `publish-pypi-core` and
+  `publish-pypi-adapters` jobs both pull from the `pypi` deployment
+  environment so PyPI's trust policy can be scoped to it.
+- `processfork-vllm` bumped to `1.0.1`.
+
 ## [1.0.0] — 2026-05-05
 
 The initial public release. Twelve build phases, 200+ tests across
