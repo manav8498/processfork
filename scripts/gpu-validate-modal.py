@@ -29,6 +29,11 @@ import modal
 image = (
     modal.Image.from_registry("nvidia/cuda:12.4.1-cudnn-devel-ubuntu22.04", add_python="3.11")
     .apt_install("git", "curl", "ca-certificates")
+    # vLLM V1 rejects pickled callables in collective_rpc by default
+    # (msgspec strictness). Our v1.0.2 path ships module-level helper
+    # functions; opt in to pickle-based serialization for them. This
+    # is a per-worker env, so it must be set on the image.
+    .env({"VLLM_ALLOW_INSECURE_SERIALIZATION": "1"})
     .pip_install(
         "processfork>=1.0.1",
         "processfork-sglang>=1.0.0",

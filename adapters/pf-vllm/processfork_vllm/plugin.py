@@ -12,6 +12,14 @@ Two execution modes:
   the path. Bit-exact replay requires the worker started with
   ``--enforce-deterministic`` (vLLM ≥0.10).
 
+The plugin transparently supports both vLLM **V0** (≤0.9 — direct
+attribute access to ``worker.cache_engine``) and vLLM **V1** (≥0.10 —
+subprocess workers + ``collective_rpc``). For V1, the operator must
+set ``VLLM_ALLOW_INSECURE_SERIALIZATION=1`` on the worker environment
+because our V1 path ships pickled callables (the worker-side
+``_v1_*`` helpers below) through the RPC channel; vLLM's default
+msgspec serializer rejects callables for security reasons.
+
 The wire format is ``paged-batchinvariant-v1``; see
 ``agent_docs/cache-layer.md`` for the on-disk layout.
 """
