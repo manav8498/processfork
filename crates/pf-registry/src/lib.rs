@@ -40,6 +40,7 @@ pub mod file;
 pub mod hf;
 pub mod image_ref;
 pub mod ipfs;
+pub mod oci;
 pub mod registry;
 pub mod s3;
 pub mod sign;
@@ -48,6 +49,7 @@ pub use file::FileRegistry;
 pub use hf::HfRegistry;
 pub use image_ref::{ImageRef, ImageRefError};
 pub use ipfs::IpfsRegistry;
+pub use oci::OciRegistry;
 pub use registry::{LayerSet, Registry, RegistryError};
 pub use s3::S3Registry;
 pub use sign::{ManifestSignature, sign_manifest, verify_manifest};
@@ -71,10 +73,6 @@ pub fn open(
                 .cloned()
                 .unwrap_or_else(|| "http://127.0.0.1:5001".into()),
         ))),
-        ImageRef::Oci { .. } => Err(RegistryError::UnsupportedScheme(
-            "oci:// — local OCI registry adapter lands in v1.0.1; the wire \
-             format is stable, the implementation is the deferred work."
-                .into(),
-        )),
+        ImageRef::Oci { .. } => Ok(Box::new(OciRegistry::new(auth.clone()))),
     }
 }
