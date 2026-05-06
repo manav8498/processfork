@@ -32,14 +32,11 @@ image = (
     .pip_install(
         "processfork>=1.0.1",
         "processfork-sglang>=1.0.0",
-        # Pin to vLLM 0.6.6 (last release of V0 engine architecture that
-        # processfork-vllm 1.0.1 targets directly). Newer vLLM ships V1 by
-        # default which needs the v1.0.2 collective_rpc rewrite.
-        # transformers must stay on the 4.x line — vllm 0.6.6 calls
-        # tokenizer.all_special_tokens_extended which transformers 5.x removed.
-        "vllm==0.6.6",
-        "transformers==4.46.3",
-        "tokenizers<0.21",
+        # vLLM ≥ 0.20 ships V1 (subprocess workers + new
+        # KvCacheManager) by default. processfork-vllm 1.0.2 has the
+        # collective_rpc V1 path; this validates it end-to-end. Pin
+        # at 0.20.x to keep the wire shape stable across reruns.
+        "vllm>=0.20,<0.22",
         "torch>=2.4",
         "numpy",
         "pytest",

@@ -29,6 +29,81 @@ def _gpu_enabled() -> bool:
     return os.environ.get("PF_HAS_GPU") == "1"
 
 
+# ---- V1 worker-side helpers ----
+#
+# These are module-level (not methods) so collective_rpc can pickle them
+# and ship them to each worker subprocess. They run *inside* the worker
+# process, with `worker` being the local Worker instance — they have
+# direct access to `worker.model_runner.kv_caches` (a list of per-layer
+# K/V tensors on the GPU).
+
+
+def _v1_occupied_pages(worker: Any) -> list[int]:
+    """Return the indices of currently-allocated KV cache pages.
+
+    V1 stores per-block usage on the worker's KvCacheManager. If we
+    can't introspect, default to range(num_pages) — overcaptures but
+    is bit-exact safe.
+    """
+    runner = getattr(worker, "model_runner", None)
+    if runner is None:
+        return []
+    kv = getattr(runner, "kv_caches", None)
+    if not kv:
+        return []
+    # kv[0].shape = (2, num_blocks, block_size, num_heads, head_dim)
+    num_blocks = int(kv[0].shape[1])
+    return list(range(num_blocks))
+
+
+def _v1_read_page(worker: Any, ix: int) -> tuple[bytes, bytes]:
+    """Copy K and V tensors for one physical page off the GPU and return
+    them as concatenated bf16 bytes. Runs *inside* the worker process."""
+    import torch  # local: only on CUDA hosts
+
+    runner = worker.model_runner
+    kv = runner.kv_caches  # list[Tensor], one per attention layer
+    ks, vs = bytearray(), bytearray()
+    for layer_cache in kv:
+        # layer_cache.shape = (2, num_blocks, block_size, num_heads, head_dim)
+        k_block = layer_cache[0, ix].contiguous().to("cpu", non_blocking=True)
+        v_block = layer_cache[1, ix].contiguous().to("cpu", non_blocking=True)
+        torch.cuda.synchronize()
+        ks += bytes(k_block.view(torch.uint8).numpy().tobytes())
+        vs += bytes(v_block.view(torch.uint8).numpy().tobytes())
+    return bytes(ks), bytes(vs)
+
+
+def _v1_write_page(worker: Any, ix: int, k: bytes, v: bytes) -> None:
+    """Inverse of :func:`_v1_read_page` — split the byte buffers back
+    into per-layer K/V chunks and copy them onto the GPU page."""
+    import torch
+
+    runner = worker.model_runner
+    kv = runner.kv_caches
+    n_layers = len(kv)
+    k_per = len(k) // n_layers
+    v_per = len(v) // n_layers
+    for layer, layer_cache in enumerate(kv):
+        k_chunk = k[layer * k_per : (layer + 1) * k_per]
+        v_chunk = v[layer * v_per : (layer + 1) * v_per]
+        target_k = layer_cache[0, ix]
+        target_v = layer_cache[1, ix]
+        k_t = (
+            torch.frombuffer(bytearray(k_chunk), dtype=torch.uint8)
+            .view(target_k.shape)
+            .to(target_k.dtype, copy=False)
+        )
+        v_t = (
+            torch.frombuffer(bytearray(v_chunk), dtype=torch.uint8)
+            .view(target_v.shape)
+            .to(target_v.dtype, copy=False)
+        )
+        target_k.copy_(k_t.to(target_k.device, non_blocking=True))
+        target_v.copy_(v_t.to(target_v.device, non_blocking=True))
+    torch.cuda.synchronize()
+
+
 @dataclass
 class VllmCachePager:
     """Python-side ``CachePager`` — talks to a vLLM ``LLMEngine``.
@@ -98,25 +173,28 @@ class VllmCachePager:
         """
         if self.engine is None or not _gpu_enabled():
             return sorted({ix for (_, ix) in self._pages.keys()})
+
         ce = self._cache_engine()
-        # vLLM stores allocated blocks via the ``BlockManager``. We ask
-        # the engine's scheduler for currently-live block ids across all
-        # sequences. Falling back to ``range(num_gpu_blocks)`` is safe
-        # for the bit-exact case (we'll just write empty pages for the
-        # unallocated slots, which compress to ~zero bytes).
-        scheduler = getattr(self.engine, "scheduler", None)
-        if scheduler is not None and hasattr(scheduler, "block_manager"):
-            bm = scheduler.block_manager
-            # gpu_allocator.get_allocated_blocks() exists on vLLM's
-            # ``BlockSpaceManagerV2``; older engines expose ``free_blocks``.
-            getter = getattr(bm.gpu_allocator, "get_allocated_blocks", None)
-            if getter is not None:
-                return sorted(getter())
-            # Last-resort: derive from total - free.
-            total = ce.num_gpu_blocks
-            free = bm.gpu_allocator.get_num_free_blocks()
-            return list(range(total - free))
-        return list(range(ce.num_gpu_blocks))
+        if ce is not None:
+            # V0 path: walk the BlockSpaceManager.
+            scheduler = getattr(self.engine, "scheduler", None)
+            if scheduler is not None and hasattr(scheduler, "block_manager"):
+                bm = scheduler.block_manager
+                getter = getattr(bm.gpu_allocator, "get_allocated_blocks", None)
+                if getter is not None:
+                    return sorted(getter())
+                total = ce.num_gpu_blocks
+                free = bm.gpu_allocator.get_num_free_blocks()
+                return list(range(total - free))
+            return list(range(ce.num_gpu_blocks))
+
+        # V1 path: ask each worker how many KV pages it has via RPC.
+        results = self._v1_rpc(_v1_occupied_pages)
+        if not results:
+            return []
+        # All workers' page counts are identical for TP>1 (same KV
+        # cache layout across replicas); take the first.
+        return list(results[0])
 
     # ---- page read / write ----
 
@@ -132,22 +210,27 @@ class VllmCachePager:
             return ks, vs
 
         ce = self._cache_engine()
-        # ``ce.gpu_cache`` is a list[Tensor] of shape
-        # ``(2, num_blocks, block_size, num_heads, head_dim)`` per layer
-        # (the leading 2 splits K and V).  We DMA-copy the requested
-        # block to pinned host memory, one layer at a time, and return
-        # the concatenated bf16 bytes.
-        import torch  # local import: optional dep on CUDA hosts
+        if ce is not None:
+            # V0 path: direct DMA copy from worker.cache_engine.gpu_cache.
+            import torch  # local import: optional dep on CUDA hosts
 
-        ks, vs = bytearray(), bytearray()
-        for layer_cache in ce.gpu_cache:
-            kv = layer_cache  # tensor
-            k_block = kv[0, ix].contiguous().to("cpu", non_blocking=True)
-            v_block = kv[1, ix].contiguous().to("cpu", non_blocking=True)
-            torch.cuda.synchronize()
-            ks += bytes(k_block.view(torch.uint8).numpy().tobytes())
-            vs += bytes(v_block.view(torch.uint8).numpy().tobytes())
-        return bytes(ks), bytes(vs)
+            ks, vs = bytearray(), bytearray()
+            for layer_cache in ce.gpu_cache:
+                kv = layer_cache
+                k_block = kv[0, ix].contiguous().to("cpu", non_blocking=True)
+                v_block = kv[1, ix].contiguous().to("cpu", non_blocking=True)
+                torch.cuda.synchronize()
+                ks += bytes(k_block.view(torch.uint8).numpy().tobytes())
+                vs += bytes(v_block.view(torch.uint8).numpy().tobytes())
+            return bytes(ks), bytes(vs)
+
+        # V1 path: ship the read into the worker subprocess via
+        # collective_rpc; the worker copies the K/V bytes for `ix`
+        # to pinned host memory and returns them through the RPC.
+        results = self._v1_rpc(_v1_read_page, ix)
+        if not results:
+            raise RuntimeError("V1 collective_rpc returned no workers' results")
+        return results[0]
 
     def write_page(self, ix: int, k: bytes, v: bytes) -> None:
         """Write ``(k, v)`` back into physical page ``ix``."""
@@ -164,6 +247,11 @@ class VllmCachePager:
             return
 
         ce = self._cache_engine()
+        if ce is None:
+            # V1 path: ship the write into the worker subprocess.
+            self._v1_rpc(_v1_write_page, ix, k, v)
+            return
+
         import torch
 
         n_layers = len(ce.gpu_cache)
@@ -201,26 +289,19 @@ class VllmCachePager:
         )
 
     def _cache_engine(self) -> Any:
-        """Resolve the worker's ``CacheEngine`` from the engine handle.
+        """Resolve the worker's ``CacheEngine`` (V0 architecture only).
 
-        vLLM has shuffled this path more than once across versions; we walk
-        every known shape and return the first one that resolves.
+        Returns ``None`` if no CacheEngine is reachable — the caller
+        should then fall back to the V1 collective_rpc path. vLLM
+        version map:
 
         * vLLM ≤ 0.6 sync:   ``engine.model_executor.driver_worker.cache_engine``
         * vLLM ≤ 0.6 async:  ``engine.engine.model_executor.driver_worker.cache_engine``
         * vLLM 0.7–0.9:      ``engine.model_executor.driver_worker.worker.cache_engine``
-        * vLLM ≥ 0.10 (V1):  ``engine.engine_core.model_executor.driver_worker.worker.cache_engine``
-                             or the cache lives on ``worker.cache_engine[0]`` (list of
-                             per-pipeline-stage engines).
-        * vLLM ≥ 0.20:       new V1 stack — engine_core may be a CoreEngineProcManager,
-                             cache state lives behind a collective_rpc('get_cache_engine').
-
-        On versions where direct attribute access is no longer possible (V1
-        with worker subprocesses), we fall back to ``collective_rpc`` which
-        is the official supported back-channel.
+        * vLLM ≥ 0.10 (V1):  no CacheEngine; cache lives on
+                             ``worker.model_runner.kv_caches`` and is only
+                             reachable via ``engine.collective_rpc``.
         """
-        # Try direct attribute walks first (fast path for older versions).
-        candidates = []
         host = getattr(self.engine, "engine", self.engine)
         for executor_attr in ("model_executor", "engine_core", "_engine_core"):
             executor = getattr(host, executor_attr, None)
@@ -230,31 +311,35 @@ class VllmCachePager:
                 worker = getattr(executor, worker_attr, None)
                 if worker is None:
                     continue
-                # vLLM ≥0.7 wraps the worker once more under .worker.
                 inner = getattr(worker, "worker", worker)
                 ce = getattr(inner, "cache_engine", None)
                 if ce is not None:
-                    # On some V1 builds cache_engine is a list (one per
-                    # pipeline-parallel stage); first stage is the right one.
                     return ce[0] if isinstance(ce, list) and ce else ce
-                candidates.append(f"{executor_attr}.{worker_attr}")
+        return None
 
-        # Fallback: V1 worker subprocess — talk to it via collective_rpc.
-        executor = getattr(host, "model_executor", None) or getattr(host, "engine_core", None)
-        if executor is not None and hasattr(executor, "collective_rpc"):
-            try:
-                results = executor.collective_rpc("get_cache_engine")
-                if results:
-                    ce = results[0]
-                    return ce[0] if isinstance(ce, list) and ce else ce
-            except Exception:  # pragma: no cover - defensive
-                pass
+    def _is_v1(self) -> bool:
+        """Best-effort detection of vLLM V1 (subprocess-worker) architecture."""
+        host = getattr(self.engine, "engine", self.engine)
+        # V1's EngineCoreClient exposes collective_rpc; V0's
+        # GPUExecutor / RayGPUExecutor doesn't have that name on the
+        # public engine handle.
+        return hasattr(host, "collective_rpc") or hasattr(self.engine, "collective_rpc")
 
-        raise RuntimeError(
-            "could not resolve worker.cache_engine from the supplied vLLM engine — "
-            f"tried {candidates!r} and collective_rpc fallback. "
-            "Open an issue with your vllm.__version__ so we can add the right path."
+    def _v1_rpc(self, fn: Any, *args: Any) -> Any:
+        """Execute ``fn`` on every V1 worker via ``collective_rpc``.
+        Returns the list of per-worker results. For tensor-parallel
+        size 1 the caller takes ``[0]``."""
+        host = getattr(self.engine, "engine", self.engine)
+        rpc = (
+            getattr(host, "collective_rpc", None)
+            or getattr(self.engine, "collective_rpc", None)
         )
+        if rpc is None:
+            raise RuntimeError(
+                "vLLM V1 detected but engine.collective_rpc is missing — "
+                "your vllm version may be too new or too old for the v1.0.2 shim."
+            )
+        return rpc(fn, args=args)
 
 
 # ---- HTTP plugin shape ----
