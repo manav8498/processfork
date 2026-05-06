@@ -6,6 +6,14 @@
 </p>
 
 <p align="center">
+  <a href="./demo/processfork-demo.cast">
+    <img src="./demo/processfork-demo.gif" alt="60-second demo: pf snapshot → pf fork ×12 → pf merge → pf push file:// → pf clone on a fresh store" width="100%">
+  </a>
+  <br>
+  <sub>↑ <a href="./demo/processfork-demo.cast">Replay it locally</a>: <code>asciinema play demo/processfork-demo.cast</code></sub>
+</p>
+
+<p align="center">
   <a href="https://crates.io/crates/processfork"><img src="https://img.shields.io/crates/v/processfork?label=crates.io&color=orange" alt="crates.io"></a>
   <a href="https://pypi.org/project/processfork/"><img src="https://img.shields.io/pypi/v/processfork?label=PyPI&color=blue" alt="PyPI"></a>
   <a href="https://www.npmjs.com/package/@processfork/sdk"><img src="https://img.shields.io/npm/v/@processfork/sdk?label=npm&color=red" alt="npm"></a>
