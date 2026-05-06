@@ -57,6 +57,56 @@ The `pf-cache` crate is the only place we expect FFI / unsafe in v1
 explaining why and what invariants it relies on. Reviewed in every
 PR.
 
+## Advisories
+
+### PF-SA-2026-001 — Path traversal on checkout (Zip Slip), v1.0.0–v1.0.2
+
+**Severity:** High. **Fixed in:** v1.0.3.
+
+A malicious `.pfimg` whose `fs.tree.v1` entries had `path` values
+containing `..` segments or absolute paths could write outside the
+target directory on `pf checkout` / `pf clone`. The `restore_tree`
+function in `pf-world` did `staging.join(&entry.path)` with no
+component validation. Symlink targets were also unchecked, so a
+restored symlink could point outside the sandbox and a follow-up
+write through the link would escape.
+
+**Fix:** `safe_join()` validates every entry path component-by-
+component (rejects `..`, absolute paths, Windows drive prefixes).
+`check_symlink_target()` rejects absolute symlink targets and
+relative targets whose component-walk depth ever goes negative
+relative to the restore root. Three regression tests in
+`crates/pf-world/src/fs.rs::tests`.
+
+**Mitigation for v1.0.2 users:** only `pf checkout` / `pf clone` of
+**untrusted** `.pfimg` files is exposed; locally-produced images are
+unaffected (the capture path never emits `..`). Upgrade to v1.0.3.
+
+Reported by Codex (anonymous reviewer) as part of the v1.0.2
+production-readiness audit, 2026-05-06.
+
+### PF-SA-2026-002 — Env-var secret leakage on `pf snapshot`, v1.0.0–v1.0.2
+
+**Severity:** High. **Fixed in:** v1.0.3.
+
+`pf snapshot` captured `std::env::vars()` verbatim into the world
+layer's `env` blob; the documented `--scrub-env <regex>` flag was
+never exposed on the CLI surface. Snapshots taken by operators with
+`OPENAI_API_KEY` / `ANTHROPIC_API_KEY` / `GITHUB_TOKEN` / etc. in
+their shell environment leaked those secrets into the resulting
+`.pfimg`.
+
+**Fix:** v1.0.3 wires `--scrub-env <regex>` (repeatable) through
+`pf snapshot` and `processfork.snapshot_filesystem()`. Recommended
+baseline: `--scrub-env '(?i)token|secret|password|key'`. Regression
+test in `crates/pf-cli/tests/cli_smoke.rs::snapshot_scrub_env_redacts_matching_keys`.
+
+**Mitigation for v1.0.2 users:** **delete any `.pfimg` you pushed to
+a registry while `OPENAI_API_KEY` (or similar) was in scope** — the
+env blob is content-addressed so the secret is permanently in the
+referenced blob until garbage-collected. Re-snapshot under v1.0.3
+with `--scrub-env`.
+
 ## Out of scope (v1)
 
 - Side-channel resistance.

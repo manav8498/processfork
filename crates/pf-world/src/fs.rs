@@ -75,6 +75,10 @@ impl WalkFsCapture {
                 ".git/objects".into(),
                 "target".into(),
                 "node_modules".into(),
+                // `.pfcid` is the sentinel `pf checkout` writes so a
+                // subsequent `pf snapshot` knows its parent CID. We
+                // skip it here so it never lands in the captured tree.
+                ".pfcid".into(),
             ],
         }
     }
@@ -121,8 +125,16 @@ impl WalkFsCapture {
             .follow_links(self.follow_symlinks)
             .into_iter()
             .filter_entry(|e| {
-                let p = e.path().to_string_lossy();
-                !self.ignore.iter().any(|frag| p.contains(frag.as_str()))
+                // Component-segment match (NOT substring). The v1.0.2
+                // audit found that the previous `p.contains(frag)` test
+                // dropped legitimate paths whose name happened to share
+                // a substring with an ignore entry, e.g.
+                // `src/targeted/keep.txt` was filtered because "target"
+                // appeared as a substring. We now compare each
+                // path-component to each ignore entry exactly. Multi-
+                // segment ignores like ".git/objects" still work via
+                // path-prefix containment of the joined segments.
+                !path_matches_any_ignore(e.path(), &self.ignore)
             })
             .filter_map(std::result::Result::ok)
             .collect();
@@ -237,11 +249,13 @@ pub fn restore_tree(
         .iter()
         .filter(|e| matches!(e.kind, FsEntryKind::Dir))
     {
-        std::fs::create_dir_all(staging.join(&e.path))?;
+        let safe = safe_join(&staging, &e.path)?;
+        std::fs::create_dir_all(&safe)?;
+        apply_mode(&safe, &e.mode)?;
     }
     // Pass 2: files + symlinks.
     for e in &tree.entries {
-        let p = staging.join(&e.path);
+        let p = safe_join(&staging, &e.path)?;
         match e.kind {
             FsEntryKind::Dir => {}
             FsEntryKind::File => {
@@ -253,27 +267,168 @@ pub fn restore_tree(
                     std::fs::create_dir_all(parent)?;
                 }
                 std::fs::write(&p, bytes)?;
+                apply_mode(&p, &e.mode)?;
             }
             FsEntryKind::Symlink => {
-                let target = e.link_target.as_ref().ok_or_else(|| {
+                let raw_target = e.link_target.as_ref().ok_or_else(|| {
                     pf_core::Error::Integrity(format!(
                         "symlink entry {} missing link_target",
                         e.path
                     ))
                 })?;
+                // Symlink target hardening: refuse absolute targets and
+                // refuse relative targets that would escape the staging
+                // root. Together with the safe_join above this means a
+                // malicious .pfimg can never write or link outside the
+                // restore directory.
+                check_symlink_target(&staging, &p, raw_target)?;
                 if let Some(parent) = p.parent() {
                     std::fs::create_dir_all(parent)?;
                 }
                 #[cfg(unix)]
-                std::os::unix::fs::symlink(target, &p)?;
+                std::os::unix::fs::symlink(raw_target, &p)?;
                 #[cfg(not(unix))]
-                std::fs::write(&p, target.as_bytes())?;
+                std::fs::write(&p, raw_target.as_bytes())?;
             }
         }
     }
 
     // Atomic flip.
     std::fs::rename(&staging, dst)?;
+    Ok(())
+}
+
+// `safe_join` (defined further down) is the v1.0.3 fix for the
+// "Zip Slip"–style CVE found in the v1.0.2 audit: a malicious .pfimg
+// with `path: "../../etc/passwd"` could write outside the target dir.
+
+/// Component-segment ignore matcher. v1.0.2 audit found that
+/// substring-matching dropped legitimate paths like
+/// `src/targeted/keep.txt` (because "target" appeared as a substring).
+///
+/// We now match each ignore entry as a *path-component slash-sequence*:
+/// an ignore of "target" matches a path that has any component equal
+/// to "target", but does NOT match "targeted" or "untargeted".
+/// Multi-segment ignores like ".git/objects" match consecutive
+/// component runs.
+fn path_matches_any_ignore(path: &Path, ignores: &[String]) -> bool {
+    let comps: Vec<&str> = path
+        .components()
+        .filter_map(|c| match c {
+            std::path::Component::Normal(s) => s.to_str(),
+            _ => None,
+        })
+        .collect();
+    for ign in ignores {
+        // Split each ignore on `/` so `.git/objects` checks for the
+        // consecutive pair, while bare `target` checks for the single
+        // segment.
+        let needles: Vec<&str> = ign.split('/').filter(|s| !s.is_empty()).collect();
+        if needles.is_empty() {
+            continue;
+        }
+        for w in comps.windows(needles.len()) {
+            if w == needles.as_slice() {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// Join `relative` onto `root`, but reject anything that would escape
+/// `root`. Catches `..` segments, absolute paths, and Windows drive
+/// letters. Returns `pf_core::Error::Integrity` on any escape attempt.
+///
+/// v1.0.3 fix for the "Zip Slip"–style CVE found in the v1.0.2 audit.
+fn safe_join(root: &Path, relative: &str) -> pf_core::Result<PathBuf> {
+    let candidate = Path::new(relative);
+    if candidate.is_absolute() {
+        return Err(pf_core::Error::Integrity(format!(
+            "fs.tree entry has absolute path {relative:?} — refusing"
+        )));
+    }
+    // Component-by-component check rather than `..`-substring (substring
+    // would false-positive on legitimate names like "..foo").
+    for comp in candidate.components() {
+        match comp {
+            std::path::Component::ParentDir => {
+                return Err(pf_core::Error::Integrity(format!(
+                    "fs.tree entry path {relative:?} contains `..` — refusing"
+                )));
+            }
+            std::path::Component::RootDir | std::path::Component::Prefix(_) => {
+                return Err(pf_core::Error::Integrity(format!(
+                    "fs.tree entry path {relative:?} has root/prefix — refusing"
+                )));
+            }
+            std::path::Component::CurDir | std::path::Component::Normal(_) => {}
+        }
+    }
+    Ok(root.join(candidate))
+}
+
+/// Reject symlink targets that would resolve outside the restore root.
+/// Absolute targets are always rejected (they obviously escape). For
+/// relative targets we walk the components from the symlink's parent
+/// dir and reject if the cumulative depth ever goes negative relative
+/// to the root.
+fn check_symlink_target(root: &Path, link_path: &Path, target: &str) -> pf_core::Result<()> {
+    let target_path = Path::new(target);
+    if target_path.is_absolute() {
+        return Err(pf_core::Error::Integrity(format!(
+            "symlink target {target:?} is absolute — refusing"
+        )));
+    }
+    // Compute the symlink's depth below root, then walk the target's
+    // components keeping a running depth counter. If it ever goes
+    // below 0 the symlink would escape.
+    let link_depth = link_path
+        .strip_prefix(root)
+        .ok()
+        .map_or(0, |p| p.components().count().saturating_sub(1));
+    let mut depth = isize::try_from(link_depth).unwrap_or(isize::MAX);
+    for comp in target_path.components() {
+        match comp {
+            std::path::Component::ParentDir => depth -= 1,
+            std::path::Component::Normal(_) => depth += 1,
+            std::path::Component::CurDir => {}
+            std::path::Component::RootDir | std::path::Component::Prefix(_) => {
+                return Err(pf_core::Error::Integrity(format!(
+                    "symlink target {target:?} has root/prefix — refusing"
+                )));
+            }
+        }
+        if depth < 0 {
+            return Err(pf_core::Error::Integrity(format!(
+                "symlink target {target:?} escapes restore root — refusing"
+            )));
+        }
+    }
+    Ok(())
+}
+
+/// Apply the captured unix mode (e.g. "100755") to `path`. No-op on
+/// Windows. The mode string is taken from `unix_mode_string()` at
+/// capture time — the high bits are the file type and we mask them
+/// out before chmod (only the permission bits matter for restore).
+#[cfg(unix)]
+fn apply_mode(path: &Path, mode: &str) -> pf_core::Result<()> {
+    use std::os::unix::fs::PermissionsExt as _;
+    let raw = u32::from_str_radix(mode, 8).unwrap_or(0o644);
+    let perm = std::fs::Permissions::from_mode(raw & 0o7777);
+    // Don't chmod symlinks (lchmod isn't portable); the symlink's
+    // own mode is irrelevant on every linux/macos host.
+    let meta = std::fs::symlink_metadata(path)?;
+    if meta.file_type().is_symlink() {
+        return Ok(());
+    }
+    std::fs::set_permissions(path, perm)?;
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn apply_mode(_path: &Path, _mode: &str) -> pf_core::Result<()> {
     Ok(())
 }
 
@@ -410,6 +565,141 @@ mod tests {
                 .to_str()
                 .unwrap(),
             "real.txt"
+        );
+    }
+
+    // ---- v1.0.3 audit-fix regression tests ----
+
+    /// CVE: malicious .pfimg with `..` in a path must be refused.
+    /// v1.0.2 audit reproduced writing outside the target dir twice.
+    #[test]
+    fn malicious_relative_path_traversal_is_refused() {
+        let blobs: Arc<dyn BlobStore> = Arc::new(MemBlobStore::new());
+        let payload = b"PWNED";
+        let blob = blobs.put(payload).unwrap();
+        let tree = FsTree {
+            kind: "fs.tree.v1".into(),
+            entries: vec![FsTreeEntry {
+                path: "../../escape.txt".into(),
+                mode: "100644".into(),
+                size: payload.len() as u64,
+                kind: FsEntryKind::File,
+                blob: Some(blob),
+                link_target: None,
+            }],
+        };
+        let tree_bytes = serde_json::to_vec(&tree).unwrap();
+        let tree_cid = blobs.put(&tree_bytes).unwrap();
+
+        let restore_root = TempDir::new().unwrap();
+        let dst = restore_root.path().join("dst");
+        let err = restore_tree(&blobs, &tree_cid, &dst).unwrap_err();
+        assert!(
+            format!("{err}").contains("`..`") || format!("{err}").contains("refusing"),
+            "expected path-traversal refusal, got {err}"
+        );
+        // And the would-be escaped path doesn't exist.
+        assert!(!restore_root.path().join("escape.txt").exists());
+    }
+
+    /// CVE: malicious .pfimg with an absolute path must be refused.
+    #[test]
+    fn malicious_absolute_path_is_refused() {
+        let blobs: Arc<dyn BlobStore> = Arc::new(MemBlobStore::new());
+        let blob = blobs.put(b"x").unwrap();
+        let tree = FsTree {
+            kind: "fs.tree.v1".into(),
+            entries: vec![FsTreeEntry {
+                path: "/tmp/should-not-write".into(),
+                mode: "100644".into(),
+                size: 1,
+                kind: FsEntryKind::File,
+                blob: Some(blob),
+                link_target: None,
+            }],
+        };
+        let tree_cid = blobs.put(&serde_json::to_vec(&tree).unwrap()).unwrap();
+        let restore_root = TempDir::new().unwrap();
+        let dst = restore_root.path().join("dst");
+        let err = restore_tree(&blobs, &tree_cid, &dst).unwrap_err();
+        assert!(
+            format!("{err}").contains("absolute") || format!("{err}").contains("refusing"),
+            "expected absolute-path refusal, got {err}"
+        );
+    }
+
+    /// CVE: malicious symlink whose target escapes the restore root
+    /// must be refused (otherwise a follow-up file-write through the
+    /// link writes outside the sandbox).
+    #[cfg(unix)]
+    #[test]
+    fn malicious_symlink_escape_is_refused() {
+        let blobs: Arc<dyn BlobStore> = Arc::new(MemBlobStore::new());
+        let target_str = "../../escape";
+        let blob = blobs.put(target_str.as_bytes()).unwrap();
+        let tree = FsTree {
+            kind: "fs.tree.v1".into(),
+            entries: vec![FsTreeEntry {
+                path: "evil.lnk".into(),
+                mode: "120777".into(),
+                size: target_str.len() as u64,
+                kind: FsEntryKind::Symlink,
+                blob: Some(blob),
+                link_target: Some(target_str.to_owned()),
+            }],
+        };
+        let tree_cid = blobs.put(&serde_json::to_vec(&tree).unwrap()).unwrap();
+        let restore_root = TempDir::new().unwrap();
+        let dst = restore_root.path().join("dst");
+        let err = restore_tree(&blobs, &tree_cid, &dst).unwrap_err();
+        assert!(
+            format!("{err}").contains("escape") || format!("{err}").contains("refusing"),
+            "expected symlink-escape refusal, got {err}"
+        );
+    }
+
+    /// v1.0.2 audit: 0755 source file restored as 0644.
+    #[cfg(unix)]
+    #[test]
+    fn executable_mode_is_restored() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let src = TempDir::new().unwrap();
+        write(src.path(), "script.sh", b"#!/bin/sh\necho hi\n");
+        let scr = src.path().join("script.sh");
+        std::fs::set_permissions(&scr, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let blobs: Arc<dyn BlobStore> = Arc::new(MemBlobStore::new());
+        let cid = WalkFsCapture::new(src.path()).capture(&blobs).unwrap();
+
+        let restore_root = TempDir::new().unwrap();
+        let dst = restore_root.path().join("r");
+        restore_tree(&blobs, &cid, &dst).unwrap();
+        let meta = std::fs::metadata(dst.join("script.sh")).unwrap();
+        assert_eq!(
+            meta.permissions().mode() & 0o7777,
+            0o755,
+            "executable bit must survive snapshot+restore"
+        );
+    }
+
+    /// v1.0.2 audit: substring matching dropped legitimate paths
+    /// like `src/targeted/keep.txt` (the "target" segment is also a
+    /// default ignore). After v1.0.3 the match is component-segment.
+    #[test]
+    fn ignore_matches_segments_not_substrings() {
+        let src = TempDir::new().unwrap();
+        write(src.path(), "src/targeted/keep.txt", b"keep");
+        write(src.path(), "target/should-skip.txt", b"skip");
+        let blobs: Arc<dyn BlobStore> = Arc::new(MemBlobStore::new());
+        let cid = WalkFsCapture::new(src.path()).capture(&blobs).unwrap();
+        let tree: FsTree = serde_json::from_slice(&blobs.get(&cid).unwrap()).unwrap();
+        let paths: Vec<&str> = tree.entries.iter().map(|e| e.path.as_str()).collect();
+        assert!(
+            paths.contains(&"src/targeted/keep.txt"),
+            "src/targeted/keep.txt must NOT be filtered (was: {paths:?})"
+        );
+        assert!(
+            !paths.iter().any(|p| p.starts_with("target/")),
+            "target/ subtree must be filtered (was: {paths:?})"
         );
     }
 }

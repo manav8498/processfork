@@ -25,6 +25,11 @@ pub fn run(store_root: &Path, args: Args) -> anyhow::Result<()> {
     let manifest = store.get_manifest(&cid)?;
     let blobs = store.blobs_arc();
     pf_world::restore_tree(&blobs, &manifest.world.fs, &args.into)?;
+    // Drop a `.pfcid` sentinel so a subsequent `pf snapshot --fs-root <into>`
+    // automatically picks `cid` as its parent (closes the v1.0.2 audit
+    // 'fork → edit → snapshot → merge breaks because no common ancestor'
+    // finding without forcing every operator to remember --parent).
+    let _ = std::fs::write(args.into.join(".pfcid"), cid.as_str().as_bytes());
     println!("✓ restored to {}", args.into.display());
     Ok(())
 }

@@ -109,7 +109,7 @@ Identical content shares storage automatically — 12 parallel forks use **~1.5�
 
 ## Status
 
-`v1.0.2` tagged. Live across PyPI, crates.io, npm, and GHCR. All four registry adapters (`hf://`, `s3://`, `ipfs://`, `oci://`) ship live in the default build; the §M2 browser-DOM CDP capture is wired; `tests/{hf,oci,s3,ipfs}_round_trip.rs` exercise the full push→pull cycle through wiremock.
+`v1.0.3` tagged — **security release**. Closes 10 production-readiness blockers from an independent v1.0.2 audit, including two CVE-class fixes (path-traversal on checkout + env-var secret leakage on `pf snapshot`). See [`SECURITY.md`](./SECURITY.md) for advisories `PF-SA-2026-001` and `PF-SA-2026-002`. **Operators on v1.0.0–v1.0.2 should upgrade and rotate any secrets that may have been in `std::env::vars()` when they took a snapshot pushed to a registry.**
 
 | metric                                                 | observed                 | target           |
 |--------------------------------------------------------|--------------------------|------------------|

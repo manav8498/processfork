@@ -36,6 +36,7 @@ from ._pf_py import (  # type: ignore[import-not-found]
     checkout_filesystem,
     digest_of,
     merge,
+    read_blob,
     read_manifest,
     snapshot_filesystem,
 )
@@ -46,6 +47,7 @@ __all__ = [
     "checkout_filesystem",
     "digest_of",
     "merge",
+    "read_blob",
     "read_manifest",
     "snapshot_filesystem",
 ]

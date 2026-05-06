@@ -6,6 +6,7 @@
 use std::path::Path;
 
 use assert_cmd::Command;
+use pf_core::store::PfStore;
 use predicates::str::contains;
 use tempfile::TempDir;
 
@@ -344,4 +345,199 @@ fn completions_emits_a_shell_script() {
         .assert()
         .success()
         .stdout(contains("_pf"));
+}
+
+// ---- v1.0.3 audit-fix CLI regression tests ----
+
+/// v1.0.2 audit: --trace-from-jsonl with a missing path silently
+/// captured an empty trace, then later broke `pf merge`. Should fail
+/// at snapshot time.
+#[test]
+fn snapshot_with_missing_trace_path_fails_fast() {
+    let store = TempDir::new().unwrap();
+    let sandbox = TempDir::new().unwrap();
+    make_sandbox(sandbox.path());
+    pf(store.path())
+        .args(["snapshot", "--agent-id", "t", "--fs-root"])
+        .arg(sandbox.path())
+        .args(["--trace-from-jsonl", "/nonexistent/trace.jsonl"])
+        .assert()
+        .failure()
+        .stderr(contains("does not exist"));
+}
+
+/// v1.0.2 audit: snapshots after `pf checkout` had `parents: []`
+/// so `pf merge` reported "no common ancestor". v1.0.3 writes a
+/// `.pfcid` sentinel on checkout that snapshot autodetects as parent.
+#[test]
+fn checkout_then_snapshot_inherits_parent_cid_via_sentinel() {
+    let store = TempDir::new().unwrap();
+    let sandbox = TempDir::new().unwrap();
+    make_sandbox(sandbox.path());
+
+    // 1. Original snapshot.
+    let cid = String::from_utf8(
+        pf(store.path())
+            .args(["snapshot", "--agent-id", "t", "--fs-root"])
+            .arg(sandbox.path())
+            .assert()
+            .success()
+            .get_output()
+            .stdout
+            .clone(),
+    )
+    .unwrap()
+    .trim()
+    .to_owned();
+
+    // 2. Check it out into a fresh dir.
+    let restored = TempDir::new().unwrap();
+    let into = restored.path().join("r");
+    pf(store.path())
+        .args(["checkout", &cid, "--into"])
+        .arg(&into)
+        .assert()
+        .success();
+
+    // The sentinel must exist + contain the CID.
+    let pfcid = std::fs::read_to_string(into.join(".pfcid")).unwrap();
+    assert_eq!(pfcid.trim(), cid);
+
+    // 3. Snapshot the restored tree (no --parent flag passed).
+    let edited_cid = String::from_utf8(
+        pf(store.path())
+            .args(["snapshot", "--agent-id", "t", "--fs-root"])
+            .arg(&into)
+            .assert()
+            .success()
+            .get_output()
+            .stdout
+            .clone(),
+    )
+    .unwrap()
+    .trim()
+    .to_owned();
+
+    // 4. The new manifest should list cid as parent.
+    let s = PfStore::open(store.path()).unwrap();
+    let edited = s
+        .get_manifest(&pf_core::digest::Digest256::parse(&edited_cid).unwrap())
+        .unwrap();
+    assert_eq!(
+        edited.parents.len(),
+        1,
+        "post-checkout snapshot should inherit the parent CID via .pfcid"
+    );
+    assert_eq!(edited.parents[0].as_str(), cid);
+}
+
+/// v1.0.2 audit: `pf gc --retain-recent 1` deleted nested file blobs
+/// inside the retained manifest's FsTree, breaking subsequent
+/// `pf checkout`. v1.0.3 GC walks the transitive blob DAG.
+#[test]
+fn gc_retain_recent_does_not_orphan_fs_tree_blobs() {
+    let store = TempDir::new().unwrap();
+    let sandbox_a = TempDir::new().unwrap();
+    make_sandbox(sandbox_a.path());
+    let sandbox_b = TempDir::new().unwrap();
+    make_sandbox(sandbox_b.path());
+    // Write a different file content in B so its FsTree differs.
+    std::fs::write(
+        sandbox_b.path().join("README.md"),
+        "# different demo content\n",
+    )
+    .unwrap();
+
+    // Snapshot A then B (B is newer; retain_recent=1 keeps B, GCs A).
+    let _cid_a = String::from_utf8(
+        pf(store.path())
+            .args(["snapshot", "--agent-id", "t", "--fs-root"])
+            .arg(sandbox_a.path())
+            .assert()
+            .success()
+            .get_output()
+            .stdout
+            .clone(),
+    )
+    .unwrap()
+    .trim()
+    .to_owned();
+    // tiny sleep so created_at orders B after A.
+    std::thread::sleep(std::time::Duration::from_millis(20));
+    let cid_b = String::from_utf8(
+        pf(store.path())
+            .args(["snapshot", "--agent-id", "t", "--fs-root"])
+            .arg(sandbox_b.path())
+            .assert()
+            .success()
+            .get_output()
+            .stdout
+            .clone(),
+    )
+    .unwrap()
+    .trim()
+    .to_owned();
+
+    // GC keeping only the most recent (B). Pre-fix this deleted B's
+    // file-content blobs because they sat inside its FsTree, not on
+    // the manifest's top-level layer descriptors.
+    pf(store.path())
+        .args(["gc", "--retain-recent", "1"])
+        .assert()
+        .success();
+
+    // Checkout B must still succeed end-to-end.
+    let restore = TempDir::new().unwrap();
+    let into = restore.path().join("r");
+    pf(store.path())
+        .args(["checkout", &cid_b, "--into"])
+        .arg(&into)
+        .assert()
+        .success();
+    assert_eq!(
+        std::fs::read(into.join("README.md")).unwrap(),
+        b"# different demo content\n",
+        "GC must not clobber FsTree-nested blobs"
+    );
+}
+
+/// v1.0.2 audit: env vars (including secrets) were captured verbatim
+/// because `pf snapshot` exposed no --scrub-env flag. v1.0.3 wires it.
+#[test]
+fn snapshot_scrub_env_redacts_matching_keys() {
+    let store = TempDir::new().unwrap();
+    let sandbox = TempDir::new().unwrap();
+    make_sandbox(sandbox.path());
+    let cid = String::from_utf8(
+        pf(store.path())
+            .env("MY_SECRET_TOKEN", "super-secret-value-do-not-leak")
+            .env("PUBLIC_VAR", "this-is-fine")
+            .args(["snapshot", "--agent-id", "t", "--fs-root"])
+            .arg(sandbox.path())
+            .args(["--scrub-env", "(?i)secret|token"])
+            .assert()
+            .success()
+            .get_output()
+            .stdout
+            .clone(),
+    )
+    .unwrap()
+    .trim()
+    .to_owned();
+
+    let s = PfStore::open(store.path()).unwrap();
+    let m = s
+        .get_manifest(&pf_core::digest::Digest256::parse(&cid).unwrap())
+        .unwrap();
+    let env_bytes = s.blobs().get(&m.world.env).unwrap();
+    let env_text = String::from_utf8_lossy(&env_bytes);
+    assert!(
+        !env_text.contains("super-secret-value-do-not-leak"),
+        "scrub-env regex must redact the value of MY_SECRET_TOKEN; env blob was: {env_text}"
+    );
+    // Public var should still be present.
+    assert!(
+        env_text.contains("this-is-fine"),
+        "non-matching var should be preserved"
+    );
 }

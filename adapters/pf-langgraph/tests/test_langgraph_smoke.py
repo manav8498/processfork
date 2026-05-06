@@ -26,6 +26,26 @@ def test_put_then_get_returns_recent_checkpoint(tmp_path: Path) -> None:
     assert got.cid == b.cid != a.cid
 
 
+def test_get_returns_real_state_not_manifest_placeholder(tmp_path: Path) -> None:
+    """v1.0.2 audit: ProcessForkCheckpointer.get() returned a
+    placeholder ``{"_manifest": ...}`` dict instead of the actual
+    checkpoint state. v1.0.3 reads the trace blob and reconstitutes
+    the original state dict end-to-end."""
+    cp = ProcessForkCheckpointer(tmp_path / "store")
+    state = {
+        "step": 7,
+        "messages": ["hello", "world"],
+        "meta": {"temp": 0.7, "tools": ["bash"]},
+    }
+    cp.put("thread-1", state)
+    got = cp.get("thread-1")
+    assert got is not None
+    assert "_manifest" not in got.state, (
+        "v1.0.3: state must NOT be a manifest placeholder; got %r" % got.state
+    )
+    assert got.state == state
+
+
 def test_list_yields_in_insertion_order(tmp_path: Path) -> None:
     cp = ProcessForkCheckpointer(tmp_path / "store")
     cids = [cp.put("t1", {"step": i}).cid for i in range(3)]

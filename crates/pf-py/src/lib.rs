@@ -135,14 +135,24 @@ pub fn digest_of(bytes: Vec<u8>) -> String {
 /// manifest. Returns the manifest CID (`sha256:...`).
 ///
 /// `messages` is a list of `{"role": str, "content": str}` dicts.
+///
+/// `effects` (optional) is a list of tool-call ledger entries — each
+/// a dict like
+/// ``{"timestamp": ..., "tool_id": ..., "args_hash": ...,
+///    "idempotency_key": ..., "result_hash": ...,
+///    "side_effect_class": "pure"|"idempotent"|"irreversible"|"network-only"}``.
+/// Adapters maintain this list as the agent runs; passing it here
+/// folds it into the world image so restored agents see prior side
+/// effects as facts (ACRFence — "won't double-send your email").
 #[pyfunction]
-#[pyo3(signature = (store, agent_kind, fs_root, env, messages))]
+#[pyo3(signature = (store, agent_kind, fs_root, env, messages, effects = None))]
 pub fn snapshot_filesystem(
     store: &PyPfStore,
     agent_kind: String,
     fs_root: String,
     env: Bound<'_, PyDict>,
     messages: Bound<'_, PyList>,
+    effects: Option<Bound<'_, PyList>>,
 ) -> PyResult<String> {
     let blobs: Arc<dyn BlobStore> = store.inner.blobs_arc();
 
@@ -204,9 +214,49 @@ pub fn snapshot_filesystem(
     }
     let trace_digest = blobs.put(&trace_bytes).map_err(map_err)?;
 
-    // Effects: empty ledger header (real ToolProxy is a separate API).
-    let ledger_bytes = b"{\"kind\":\"effects.ledger.v1\",\"entries\":0}\n".to_vec();
-    let ledger_digest = blobs.put(&ledger_bytes).map_err(map_err)?;
+    // Effects ledger: fold the supplied entries into a v1 ledger blob.
+    // Adapters that don't pass `effects` get the same empty header as
+    // before, but at least the surface to fix the ACRFence claim is
+    // wired end-to-end now.
+    let ledger_digest = {
+        let mut entries: Vec<serde_json::Value> = Vec::new();
+        if let Some(list) = effects {
+            for item in list.iter() {
+                let d: Bound<'_, PyDict> = item.downcast_into()?;
+                let mut obj = serde_json::Map::new();
+                for (k, v) in d.iter() {
+                    let key: String = k.extract()?;
+                    // Best-effort coerce common scalar shapes; fall
+                    // back to a String repr for anything weird.
+                    let val: serde_json::Value = if let Ok(s) = v.extract::<String>() {
+                        serde_json::Value::String(s)
+                    } else if let Ok(n) = v.extract::<i64>() {
+                        serde_json::Value::Number(n.into())
+                    } else if let Ok(b) = v.extract::<bool>() {
+                        serde_json::Value::Bool(b)
+                    } else {
+                        serde_json::Value::String(v.str()?.to_string())
+                    };
+                    obj.insert(key, val);
+                }
+                entries.push(serde_json::Value::Object(obj));
+            }
+        }
+        let mut body = format!(
+            "{{\"kind\":\"effects.ledger.v1\",\"entries\":{}}}\n",
+            entries.len()
+        )
+        .into_bytes();
+        for e in entries {
+            body.extend_from_slice(
+                serde_json::to_string(&e)
+                    .map_err(|e| PyValueError::new_err(format!("ledger serialize: {e}")))?
+                    .as_bytes(),
+            );
+            body.push(b'\n');
+        }
+        blobs.put(&body).map_err(map_err)?
+    };
 
     // Model: empty Lora delta envelope (sufficient for v1; SDK users
     // attach real diffs through dedicated APIs once Phase-10 adapters
@@ -301,6 +351,22 @@ pub fn read_manifest(py: Python<'_>, store: &PyPfStore, cid: String) -> PyResult
     let json = serde_json::to_value(&m)
         .map_err(|e| PyValueError::new_err(format!("manifest serialize: {e}")))?;
     json_value_to_py(py, &json)
+}
+
+/// Fetch the raw bytes of a blob by digest. Returns a Python `bytes`.
+/// Used by adapters that need to read individual layer blobs (e.g.
+/// the LangGraph checkpointer reads the trace blob to reconstitute
+/// state on `get()`).
+#[pyfunction]
+pub fn read_blob<'py>(
+    py: Python<'py>,
+    store: &PyPfStore,
+    digest: String,
+) -> PyResult<Bound<'py, pyo3::types::PyBytes>> {
+    let d = parse_cid(&digest)?;
+    let blobs: Arc<dyn BlobStore> = store.inner.blobs_arc();
+    let bytes = blobs.get(&d).map_err(map_err)?;
+    Ok(pyo3::types::PyBytes::new_bound(py, &bytes))
 }
 
 fn json_value_to_py(py: Python<'_>, v: &serde_json::Value) -> PyResult<PyObject> {
@@ -402,6 +468,7 @@ fn _pf_py(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(snapshot_filesystem, m)?)?;
     m.add_function(wrap_pyfunction!(checkout_filesystem, m)?)?;
     m.add_function(wrap_pyfunction!(read_manifest, m)?)?;
+    m.add_function(wrap_pyfunction!(read_blob, m)?)?;
     m.add_function(wrap_pyfunction!(merge, m)?)?;
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
     Ok(())

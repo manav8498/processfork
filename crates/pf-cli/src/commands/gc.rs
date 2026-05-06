@@ -3,8 +3,10 @@
 
 use std::collections::HashSet;
 use std::path::Path;
+use std::sync::Arc;
 
 use clap::Parser;
+use pf_core::cas::BlobStore;
 use pf_core::digest::Digest256;
 use pf_core::manifest::Manifest;
 use pf_core::store::PfStore;
@@ -31,6 +33,7 @@ pub fn run(store_root: &Path, args: Args) -> anyhow::Result<()> {
         manifests.truncate(args.retain_recent);
     }
 
+    let blobs: Arc<dyn BlobStore> = store.blobs_arc();
     let mut reachable: HashSet<Digest256> = HashSet::new();
     for (cid, m) in &manifests {
         reachable.insert(cid.clone());
@@ -38,6 +41,14 @@ pub fn run(store_root: &Path, args: Args) -> anyhow::Result<()> {
         // Plus the JSON of the manifest itself.
         let bytes = serde_json::to_vec(m)?;
         reachable.insert(Digest256::of(&bytes));
+        // v1.0.3 audit fix: walk the FsTree's per-file blobs and the
+        // PageManifest's per-page K/V blobs so retain_recent doesn't
+        // delete them out from under a retained manifest.
+        if let Ok(transitive) = pf_registry::registry::transitive_blob_digests(m, blobs.as_ref()) {
+            for d in transitive {
+                reachable.insert(d);
+            }
+        }
     }
 
     // Walk every on-disk blob; delete the unreachable ones.
@@ -90,8 +101,8 @@ fn gather_layer_digests(m: &Manifest, out: &mut HashSet<Digest256>) {
     out.insert(m.world.procs.clone());
     out.insert(m.effects.ledger.clone());
     out.insert(m.trace.messages.clone());
-    // We don't transitively walk into the blobs themselves (page
-    // manifests, fs trees) for v1 — those reference further blobs that
-    // GC would clobber. v1.1 walks the full DAG. For now, retain_recent=0
-    // (the default) is safest: it keeps every manifest's direct children.
+    // The transitive walk (FsTree-nested file blobs + PageManifest
+    // K/V page blobs) lives in the caller via
+    // pf_registry::registry::transitive_blob_digests so this function
+    // can stay sync + side-effect-free.
 }

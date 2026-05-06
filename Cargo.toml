@@ -31,7 +31,7 @@ default-members = [
 ]
 
 [workspace.package]
-version = "1.0.2"
+version = "1.0.3"
 edition = "2024"
 # MSRV bumps:
 #   1.85 → 1.88: the `home` crate (transitive via cargo-internals)
@@ -60,13 +60,13 @@ doc_markdown = "allow"
 
 [workspace.dependencies]
 # Internal crates
-pf-core    = { path = "crates/pf-core",    version = "1.0.2" }
-pf-model   = { path = "crates/pf-model",   version = "1.0.2" }
-pf-cache   = { path = "crates/pf-cache",   version = "1.0.2" }
-pf-world   = { path = "crates/pf-world",   version = "1.0.2" }
-pf-effects = { path = "crates/pf-effects", version = "1.0.2" }
-pf-merge   = { path = "crates/pf-merge",   version = "1.0.2" }
-pf-registry= { path = "crates/pf-registry",version = "1.0.2" }
+pf-core    = { path = "crates/pf-core",    version = "1.0.3" }
+pf-model   = { path = "crates/pf-model",   version = "1.0.3" }
+pf-cache   = { path = "crates/pf-cache",   version = "1.0.3" }
+pf-world   = { path = "crates/pf-world",   version = "1.0.3" }
+pf-effects = { path = "crates/pf-effects", version = "1.0.3" }
+pf-merge   = { path = "crates/pf-merge",   version = "1.0.3" }
+pf-registry= { path = "crates/pf-registry",version = "1.0.3" }
 
 # Async runtime
 tokio = { version = "1.41", features = ["full"] }

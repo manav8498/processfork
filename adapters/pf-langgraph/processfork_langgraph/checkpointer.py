@@ -98,18 +98,55 @@ class ProcessForkCheckpointer:
             yield self._read_checkpoint(thread_id, cid)
 
     def _read_checkpoint(self, thread_id: str, cid: str) -> Checkpoint:
+        """Reconstitute the original state dict from the trace blob.
+
+        v1.0.3 audit fix: prior to this, get() returned a placeholder
+        ``{"_manifest": ...}`` dict — restored agents got nothing
+        useful. We now read the trace blob via the SDK's `read_blob`,
+        decode the first message (a JSONL-encoded LangGraph state
+        wrapper written by `put`), and return the full state dict.
+        """
         import processfork
 
         manifest = processfork.read_manifest(self._store, cid)
-        # Re-decode the trace blob to get the state.
-        # Read the manifest's trace.messages digest → fetch its bytes.
-        # We don't have a public bytes-fetch in the SDK yet (planned for
-        # v1.1); for now use the file in the store directly.
-        store_root = Path(str(self._store).split("at ", 1)[1].rstrip(">")) \
-            if "at " in str(self._store) else None
-        # Best-effort fallback: just stash the manifest dict as the
-        # state. v1.1 adds a real bytes API.
-        return Checkpoint(cid=cid, thread_id=thread_id, state={"_manifest": manifest})
+        trace_digest = manifest["trace"]["messages"]
+        try:
+            trace_bytes = processfork.read_blob(self._store, trace_digest)
+        except Exception as e:
+            # Defensive: an old v1.0.2 checkpoint with no trace bytes
+            # (we never actually wrote the empty trace as a blob lookup)
+            # should still surface a sensible Checkpoint.
+            return Checkpoint(
+                cid=cid,
+                thread_id=thread_id,
+                state={"_manifest": manifest, "_decode_error": str(e)},
+            )
+
+        text = trace_bytes.decode("utf-8", errors="replace").strip()
+        if not text:
+            return Checkpoint(cid=cid, thread_id=thread_id, state={})
+        # The trace is one JSON message per line. We wrote the state as
+        # the first message's content with a "langgraph-state " prefix.
+        first_line = text.splitlines()[0]
+        try:
+            msg = json.loads(first_line)
+            content = msg.get("content", "")
+            if isinstance(content, str) and content.startswith("langgraph-state "):
+                state_json = content.removeprefix("langgraph-state ")
+                return Checkpoint(
+                    cid=cid,
+                    thread_id=thread_id,
+                    state=json.loads(state_json),
+                )
+        except (json.JSONDecodeError, ValueError):
+            pass
+        # Couldn't parse — fall back to the manifest placeholder so the
+        # caller still gets a usable Checkpoint object.
+        return Checkpoint(
+            cid=cid,
+            thread_id=thread_id,
+            state={"_manifest": manifest, "_raw_trace": text[:512]},
+        )
 
 
 def fork_thread(

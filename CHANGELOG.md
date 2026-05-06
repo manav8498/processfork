@@ -4,6 +4,87 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.0.3] — 2026-05-06 — security release
+
+Closes 10 production-readiness blockers from an independent v1.0.2
+audit. **Two are CVE-class — see `SECURITY.md` for advisories.**
+
+### Security (CVE-class)
+
+- **PF-SA-2026-001** path traversal on checkout (Zip Slip). Malicious
+  `.pfimg` could write outside the target dir via `..` paths or
+  absolute paths or unchecked symlink targets. Fix: `safe_join()` +
+  `check_symlink_target()` in `pf_world::fs`. 3 regression tests.
+- **PF-SA-2026-002** env-var secret leakage. `pf snapshot` captured
+  `std::env::vars()` verbatim — secrets included — because the
+  documented `--scrub-env <regex>` flag was never wired to the CLI.
+  Fix: `--scrub-env` now plumbed through CLI + Python SDK. 1
+  regression test.
+
+### Correctness — high impact
+
+- **GC walks the transitive blob DAG.** `pf gc --retain-recent N`
+  no longer deletes file blobs nested inside retained manifests'
+  FsTree (or page blobs nested inside the cache PageManifest). 1
+  regression test exercises the audit's exact scenario.
+- **Executable file modes survive checkout.** Captured mode bits are
+  reapplied via `set_permissions`. 1 unix regression test (0755
+  in → 0755 out).
+- **Fork → edit → snapshot → merge now works.** `pf checkout` writes
+  a `.pfcid` sentinel into the restored tree; `pf snapshot`
+  autodetects it as the parent CID. Explicit `--parent <CID>` flag
+  also added. 1 end-to-end regression test.
+- **Effects ledger is actually persisted.** `pf snapshot
+  --effects-from-jsonl <path>` and `processfork.snapshot_filesystem(...,
+  effects=[...])` fold tool-call entries into the on-disk ledger
+  instead of always emitting an empty header. Adapters can now
+  populate the ledger and the ACRFence "won't double-send your
+  email" claim has a real surface.
+
+### Correctness — medium
+
+- **Ignore rules match path components, not substrings.** Bare
+  ignore `target` no longer drops `src/targeted/keep.txt`; multi-
+  segment ignores like `.git/objects` still match consecutive
+  component runs. 1 regression test.
+- **`--trace-from-jsonl` validated at snapshot time.** Missing /
+  non-file paths fail fast with a clear error instead of silently
+  capturing an empty trace that breaks `pf merge` later. Same
+  validation also applied to the new `--effects-from-jsonl`. 1
+  regression test.
+- **LangGraph `checkpointer.get()` returns real state.** Previously
+  returned a `{"_manifest": ...}` placeholder; v1.0.3 reads the
+  trace blob via the new SDK `read_blob()` and reconstitutes the
+  original state dict end-to-end. 1 regression test.
+- **`pf snapshot` quiesces via APFS clone on macOS.** `WalkFsCapture`
+  now opts into the `clonefile(2)` fast-path by default on macOS,
+  giving a stable read-snapshot so concurrent agent writes don't
+  produce torn states. Closes the audit's "a.txt v1, b.txt v0"
+  finding on macOS hosts.
+
+### New SDK surface
+
+- `processfork.read_blob(store, digest) -> bytes` — fetch a blob
+  by digest. Used by the LangGraph adapter; useful for any operator
+  who needs to inspect layer contents without `pf` shelling out.
+
+### MSRV
+
+- Cargo workspace MSRV is **1.91** (unchanged from v1.0.2).
+
+### Versions
+
+- `processfork` (Rust + Python wheel): 1.0.2 → **1.0.3**
+- `processfork-langgraph`: 1.0.0 → **1.0.1** (real `get()` semantics)
+- `@processfork/sdk` (npm): 1.0.3 → **1.0.4**
+- 8 Rust crates on crates.io: all → **1.0.3**
+- Other 6 adapters unchanged at 1.0.0–1.0.2 (skip-existing handles them)
+
+### Test count
+
+184 → 193 cargo tests (workspace), +9 audit-fix regressions. Plus 6
+LangGraph adapter tests (was 5, +1 for the audit fix).
+
 ## [1.0.2] — 2026-05-06
 
 The "close every megaprompt gap" release. 12 spec items closed, 4
