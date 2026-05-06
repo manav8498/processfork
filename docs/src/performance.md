@@ -20,10 +20,26 @@ synthetic 4-layer fixture (32 cache pages × 16 KiB + 64 fs files ×
 | `cache_restore_64_pages`         | **34 µs**  |
 | Identical-content second snapshot| **614 B** growth |
 
-Real bit-exact replay against vLLM ≥0.10 + Llama-3-8B is
-operator-runs-it (`$PF_HAS_GPU=1`). Numbers land in
-[`benchmarks/RESULTS.md`](https://github.com/manav8498/processfork/blob/main/benchmarks/RESULTS.md)
-when the operator runs the gated lane.
+## GPU-host measurements (Modal A10G, 2026-05-06)
+
+Captured from `modal run scripts/gpu-validate-modal.py` against
+TinyLlama-1.1B on a 24 GB A10G (vLLM 0.6.6, V0 engine):
+
+| metric                                     | observed         | budget        |
+|--------------------------------------------|------------------|---------------|
+| Snapshot p50 (warm, 64 × 4 KiB fixture)    | **42 ms**        | < 500 ms p99  |
+| Snapshot min (steady-state)                | **41 ms**        | —             |
+| Snapshot p99 (incl. cold-start)            | 1180 ms          | warm only     |
+| **Bit-exact KV-cache replay**              | **✅ verified**  | `out_a == out_b` |
+| KV pages snapshotted + restored            | 38 619           | (all)         |
+| TIES + DARE real-shape Frobenius Δ         | 0.0              | identical     |
+
+Raw JSON: [`benchmarks/gpu-validation/`](https://github.com/manav8498/processfork/tree/main/benchmarks/gpu-validation).
+vLLM ≥0.10 (V1 engine, subprocess-worker architecture) needs the
+v1.0.2 `engine_core.collective_rpc('get_cache_engine')` rewrite.
+
+Larger Llama-3-8B p99 numbers on H100/A100 are operator-runs-it on a
+beefier GPU lane.
 
 ## Tuning knobs
 

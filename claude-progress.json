@@ -2,7 +2,7 @@
   "version": 1,
   "started_at": "2026-05-05T14:11:00Z",
   "current_phase": 12,
-  "current_phase_status": "done — v1.0.1 tagged and shipped end-to-end. Run 25411004140 23/23 jobs green: PyPI processfork@1.0.1 (5 platforms, OIDC), 7 PyPI adapters (OIDC), crates.io 8 crates @ 1.0.1, npm @processfork/sdk@1.0.2, ghcr.io/manav8498/processfork:1.0.1+:latest. Trusted Publishing enabled for all 8 PyPI projects — no PYPI_API_TOKEN secret needed.",
+  "current_phase_status": "done — v1.0.1 tagged and shipped end-to-end + bit-exact verified on real GPU. Run 25411004140 23/23 jobs green: PyPI processfork@1.0.1 (5 platforms, OIDC), 7 PyPI adapters (OIDC), crates.io 8 crates @ 1.0.1, npm @processfork/sdk@1.0.2, ghcr.io/manav8498/processfork:1.0.1+:latest. Trusted Publishing enabled for all 8 PyPI projects — no PYPI_API_TOKEN secret needed. GPU validation 2026-05-06 (Modal A10G + vLLM 0.6.6 + TinyLlama-1.1B): bit-exact KV-cache replay verified, 38 619 pages restored, snapshot p50 42 ms. See benchmarks/gpu-validation/2026-05-06-modal-a10g.json.",
   "phases": {
     "0":  { "name": "bootstrap",                "status": "done",        "started_at": "2026-05-05T14:11:00Z", "ended_at": "2026-05-05T14:30:00Z", "tag": "phase-0-complete", "blockers": [] },
     "1":  { "name": "core_engine_rust",         "status": "done",        "started_at": "2026-05-05T14:30:00Z", "ended_at": "2026-05-05T14:55:00Z", "tag": "phase-1-complete", "blockers": [], "results": { "snapshot_p99_ms": 8, "snapshot_budget_ms": 500, "dedup_growth_bytes": 614, "twelve_fork_ratio": "well under 1.5x" } },
@@ -74,6 +74,13 @@
       "decision": "v1.0.1 closed all three deferred items: (a) Windows + macOS Intel wheels via pyo3 generate-import-lib + maturin --zig (cross-compiled on macOS arm64 build host), (b) Linux manylinux_2_28 wheels via PyO3/maturin-action Docker (native ubuntu-24.04 has glibc 2.39, too new), (c) vLLM live FFI shim against vllm.worker.cache_engine.gpu_cache, gated on $PF_HAS_GPU=1 — mock mode round-trips byte-identical for unit tests. Plus PyPI Trusted Publishing via OIDC (pypa/gh-action-pypi-publish + environment: pypi) — eliminates PYPI_API_TOKEN entirely. CLI crate renamed pf-cli → processfork on crates.io (squatted name); binary is still `pf`. Dockerfile updated to match.",
       "impact": "high",
       "ts": "2026-05-06T01:10:00Z"
+    },
+    {
+      "id": "A-009",
+      "topic": "bit-exact GPU validation",
+      "decision": "End-to-end bit-exact KV-cache replay verified on a real GPU (Modal A10G, 24 GB VRAM, vLLM 0.6.6, TinyLlama-1.1B): 38 619 KV pages snapshotted, restored, regenerated text byte-identical (out_a == out_b). Closes the §M1/§M8 headline gap from the megaprompt. Real-GPU microbench: snapshot p50 42 ms (well under 500 ms p99 budget). Raw JSON committed to benchmarks/gpu-validation/2026-05-06-modal-a10g.json. Two real bugs surfaced in the live run that mock unit tests didn't catch — both fixed in commits e132115 (cache_engine resolver covers vllm 0.7+/V1/0.20) and the SDK-call fix in scripts/gpu-validate-modal.py. vLLM 0.6.6 is the last V0-engine release; vLLM ≥0.7 wraps the worker once more, ≥0.10 ships V1 (subprocess workers + new KvCacheManager) — V1 support is the v1.0.2 milestone via engine_core.collective_rpc('get_cache_engine'). transformers must stay on 4.x line for vllm 0.6.6 (5.x removed all_special_tokens_extended).",
+      "impact": "high",
+      "ts": "2026-05-06T03:16:00Z"
     }
   ],
   "architecture_concerns": [],

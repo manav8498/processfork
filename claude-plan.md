@@ -8,8 +8,15 @@
 
 ## Where I am right now
 
-**v1.0.0 + v1.0.1 fully shipped.** All 12 build phases complete; 200+ tests
-pass; live across 4 registries:
+**v1.0.0 + v1.0.1 fully shipped + bit-exact verified on real GPU.** All
+12 build phases complete; 200+ tests pass; live across 4 registries:
+
+GPU validation (Modal A10G, 2026-05-06, vLLM 0.6.6 + TinyLlama-1.1B):
+- ✅ vllm_bit_exact: 38 619 KV pages snapshotted + restored; out_a == out_b
+- ✅ ties_dare_merge: real-shape Frobenius Δ = 0.0
+- ✅ microbench_gpu: snapshot p50 42 ms
+- ✅ sglang_parity: stub reachable
+- raw JSON: `benchmarks/gpu-validation/2026-05-06-modal-a10g.json`
 
 | Surface | What's live |
 |---------|-------------|
@@ -39,11 +46,13 @@ These are explicitly out of scope per CLAUDE.md `## Out of scope`:
    PyPI (no longer needed at all thanks to OIDC), crates.io (replace with the
    90-day `processfork-release-ci` token already in repo secrets), npm (same).
    Operator action only.
-2. **GPU-host bit-exact round-trip** against real Llama-3-8B vLLM — the
-   wiring ships in `adapters/pf-vllm/processfork_vllm/plugin.py` and the
-   test in `tests/test_vllm_smoke.py::test_live_vllm_bit_exact_replay` skips
-   without `$PF_HAS_GPU=1`. Operator runs this on a CUDA box to flip the
-   v1.0.1 status from "shipped (mock parity)" to "shipped (bit-exact)".
+2. **vLLM V1 engine support** — current adapter targets V0's
+   `worker.cache_engine.gpu_cache`. vLLM 0.7+ wraps the worker once
+   more; vLLM ≥0.10 ships V1 (subprocess workers + new
+   `KvCacheManager`) which needs `engine_core.collective_rpc('get_cache_engine')`
+   instead of direct attribute access. v1.0.2 milestone. Bit-exact
+   replay on V0 (vLLM 0.6.6) is verified — see
+   `benchmarks/gpu-validation/2026-05-06-modal-a10g.json`.
 3. **Node.js 20 actions deprecation** (June 2026) — the workflow uses
    `actions/{checkout,setup-python,upload-artifact,download-artifact}@v4`
    plus `softprops/action-gh-release@v2`. All run on Node.js 20. Bump to

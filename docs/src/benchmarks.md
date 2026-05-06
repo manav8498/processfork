@@ -2,7 +2,29 @@
 
 > Live results: [`benchmarks/RESULTS.md`](https://github.com/manav8498/processfork/blob/main/benchmarks/RESULTS.md).
 
-Two suites:
+Three suites:
+
+## GPU validation (Modal-runnable, no SSH)
+
+`scripts/gpu-validate-modal.py` — one-shot end-to-end validation
+that proves bit-exact KV-cache replay against a real vLLM-served
+model on a real GPU. Run:
+
+```bash
+pip install modal
+modal token new
+modal run scripts/gpu-validate-modal.py
+```
+
+Costs ~$0.50 on Modal A10G ($30 free credit covers it 60×). Writes
+a JSON report you commit under `benchmarks/gpu-validation/`. The
+2026-05-06 baseline (TinyLlama-1.1B + vLLM 0.6.6 on A10G) is
+[`2026-05-06-modal-a10g.json`](https://github.com/manav8498/processfork/blob/main/benchmarks/gpu-validation/2026-05-06-modal-a10g.json):
+38 619 KV pages snapshotted + restored bit-exact, snapshot p50
+42 ms.
+
+There's also `scripts/gpu-validate.sh` (same logic as a plain bash
+script for AWS g5/RunPod/Lambda Labs/etc.).
 
 ## Microbench (build-host runnable)
 

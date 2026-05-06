@@ -74,10 +74,20 @@ Default ProcessFork mode is **near-exact** (≤1e-4 logit deviation tolerated).
 ## Build-host caveats
 
 The agent build host is macOS arm64. vLLM and SGLang require CUDA. The cache-
-layer code path is implemented and unit-tested with synthetic page fixtures,
-but the real round-trip integration test (`tests/cache_round_trip_vllm.rs`)
-is gated behind `$PF_HAS_GPU=1` and skipped on non-CUDA hosts. Operator runs
-this on a CUDA box before the v1.0 ship gate flips.
+layer code path is implemented and unit-tested with synthetic page fixtures.
+The real round-trip integration test (`tests/cache_round_trip_vllm.rs`) is
+gated behind `$PF_HAS_GPU=1` and skipped on non-CUDA hosts.
+
+**v1.0.1 GPU validation (2026-05-06)**: ran the full bit-exact round-trip
+on Modal A10G against vLLM 0.6.6 + TinyLlama-1.1B. Result: 38 619 KV pages
+snapshotted, restored, regenerated text byte-identical
+(`out_a == out_b`). Snapshot p50 42 ms (well under the 500 ms p99 budget).
+Raw JSON in `benchmarks/gpu-validation/2026-05-06-modal-a10g.json`.
+
+vLLM ≥0.10 ships V1 (subprocess-worker architecture) which needs the
+v1.0.2 `engine_core.collective_rpc('get_cache_engine')` rewrite of the
+pager — V0's directly-attribute-accessible `CacheEngine` is what the
+v1.0.1 adapter targets.
 
 ## Failure modes
 

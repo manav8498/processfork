@@ -22,7 +22,8 @@ You're 4 hours into a refactor with Claude Code. The agent has read 200 files, r
 
 ## Highlights
 
-- ⚡ **8 ms snapshots.** Full agent state — model + KV-cache + files + tools + reasoning — into one content-addressed `.pfimg`.
+- ⚡ **8 ms snapshots** (synthetic fixture); **42 ms p50** on real GPU host (Modal A10G). Full agent state — model + KV-cache + files + tools + reasoning — into one content-addressed `.pfimg`.
+- 🎯 **Bit-exact verified.** 38 619 KV pages snapshotted from a live vLLM-served TinyLlama-1.1B, restored byte-identical on a clean machine, regenerated text matched. See [`benchmarks/gpu-validation/`](https://github.com/manav8498/processfork/tree/main/benchmarks/gpu-validation).
 - 🌳 **Real fork & merge.** 12 parallel attempts share storage automatically (CoW). Merge the winner with a real 3-way diff (files, tools, trace) — git-style `<<<<<<<` markers and all.
 - 🔒 **Won't double-send your email.** HMAC-chained tool-call ledger; restored agents see prior side-effects as facts, not as actions to re-issue. (ACRFence-resistant.)
 - 🤝 **Drop-in for** Claude Code, LangGraph, OpenInterpreter, vLLM, SGLang, AutoGen, CrewAI.
