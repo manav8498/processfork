@@ -46,8 +46,11 @@ benchmarks/results/local-*
 # Generated docs
 /book/
 /site/
-/coverage/
 /docs/book/
+# /coverage/ — not ignored; baseline.json + README.md are committed
+# (see coverage/README.md). Local raw lcov.info goes here too:
+/coverage/lcov.info
+/coverage/html/
 
 # napi-rs binaries are platform-specific build artifacts
 crates/pf-ts/*.node
