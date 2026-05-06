@@ -8,7 +8,9 @@ COPY Cargo.toml Cargo.lock ./
 COPY crates ./crates
 COPY benchmarks ./benchmarks
 COPY examples ./examples
-RUN cargo build --release -p pf-cli
+# Crate package was renamed pf-cli → processfork (binary stays `pf`,
+# see crates/pf-cli/Cargo.toml [[bin]]).
+RUN cargo build --release -p processfork
 
 FROM debian:bookworm-slim
 LABEL org.opencontainers.image.source="https://github.com/manav8498/processfork"
