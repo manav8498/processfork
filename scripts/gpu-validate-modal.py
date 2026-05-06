@@ -31,12 +31,16 @@ image = (
     .apt_install("git", "curl", "ca-certificates")
     .pip_install(
         "processfork>=1.0.1",
-        "processfork-vllm>=1.0.1",
         "processfork-sglang>=1.0.0",
         "vllm>=0.6.0",
         "torch>=2.4",
         "numpy",
         "pytest",
+    )
+    # Install the adapter from main so we pick up live FFI fixes that
+    # haven't been published to PyPI yet.
+    .pip_install(
+        "git+https://github.com/manav8498/processfork.git@main#subdirectory=adapters/pf-vllm"
     )
 )
 
@@ -176,14 +180,22 @@ def validate() -> dict:
     t = {"ok": False, "test": "microbench_gpu"}
     try:
         import processfork as pf
+        store_dir = tempfile.mkdtemp(prefix="pf-gpu-store-")
         sandbox = tempfile.mkdtemp(prefix="pf-gpu-bench-")
         for i in range(64):
             with open(os.path.join(sandbox, f"f{i:02d}.dat"), "wb") as fh:
                 fh.write(os.urandom(4096))
+        store = pf.PfStore.open(store_dir)
         snapshot_ms = []
-        for _ in range(20):
+        for i in range(20):
             t0 = time.perf_counter_ns()
-            pf.snapshot(agent_id="gpu-bench", fs_root=sandbox)
+            pf.snapshot_filesystem(
+                store,
+                agent_kind="gpu-bench",
+                fs_root=sandbox,
+                env={"PWD": sandbox},
+                messages=[{"role": "user", "content": f"iter {i}"}],
+            )
             snapshot_ms.append((time.perf_counter_ns() - t0) / 1e6)
         t.update(
             ok=True,

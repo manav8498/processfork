@@ -201,20 +201,60 @@ class VllmCachePager:
         )
 
     def _cache_engine(self) -> Any:
-        """Resolve the worker's ``CacheEngine`` from the engine handle."""
-        # Synchronous LLMEngine: ``engine.model_executor.driver_worker.cache_engine``
-        # AsyncLLMEngine: ``engine.engine.model_executor...``
+        """Resolve the worker's ``CacheEngine`` from the engine handle.
+
+        vLLM has shuffled this path more than once across versions; we walk
+        every known shape and return the first one that resolves.
+
+        * vLLM ≤ 0.6 sync:   ``engine.model_executor.driver_worker.cache_engine``
+        * vLLM ≤ 0.6 async:  ``engine.engine.model_executor.driver_worker.cache_engine``
+        * vLLM 0.7–0.9:      ``engine.model_executor.driver_worker.worker.cache_engine``
+        * vLLM ≥ 0.10 (V1):  ``engine.engine_core.model_executor.driver_worker.worker.cache_engine``
+                             or the cache lives on ``worker.cache_engine[0]`` (list of
+                             per-pipeline-stage engines).
+        * vLLM ≥ 0.20:       new V1 stack — engine_core may be a CoreEngineProcManager,
+                             cache state lives behind a collective_rpc('get_cache_engine').
+
+        On versions where direct attribute access is no longer possible (V1
+        with worker subprocesses), we fall back to ``collective_rpc`` which
+        is the official supported back-channel.
+        """
+        # Try direct attribute walks first (fast path for older versions).
+        candidates = []
         host = getattr(self.engine, "engine", self.engine)
-        executor = getattr(host, "model_executor", None)
-        worker = getattr(executor, "driver_worker", None) if executor else None
-        ce = getattr(worker, "cache_engine", None)
-        if ce is None:
-            raise RuntimeError(
-                "could not resolve worker.cache_engine from the supplied vLLM engine — "
-                "ensure you passed an LLMEngine (sync) or AsyncLLMEngine and that the "
-                "worker has finished init before snapshotting."
-            )
-        return ce
+        for executor_attr in ("model_executor", "engine_core", "_engine_core"):
+            executor = getattr(host, executor_attr, None)
+            if executor is None:
+                continue
+            for worker_attr in ("driver_worker", "_driver_worker"):
+                worker = getattr(executor, worker_attr, None)
+                if worker is None:
+                    continue
+                # vLLM ≥0.7 wraps the worker once more under .worker.
+                inner = getattr(worker, "worker", worker)
+                ce = getattr(inner, "cache_engine", None)
+                if ce is not None:
+                    # On some V1 builds cache_engine is a list (one per
+                    # pipeline-parallel stage); first stage is the right one.
+                    return ce[0] if isinstance(ce, list) and ce else ce
+                candidates.append(f"{executor_attr}.{worker_attr}")
+
+        # Fallback: V1 worker subprocess — talk to it via collective_rpc.
+        executor = getattr(host, "model_executor", None) or getattr(host, "engine_core", None)
+        if executor is not None and hasattr(executor, "collective_rpc"):
+            try:
+                results = executor.collective_rpc("get_cache_engine")
+                if results:
+                    ce = results[0]
+                    return ce[0] if isinstance(ce, list) and ce else ce
+            except Exception:  # pragma: no cover - defensive
+                pass
+
+        raise RuntimeError(
+            "could not resolve worker.cache_engine from the supplied vLLM engine — "
+            f"tried {candidates!r} and collective_rpc fallback. "
+            "Open an issue with your vllm.__version__ so we can add the right path."
+        )
 
 
 # ---- HTTP plugin shape ----
