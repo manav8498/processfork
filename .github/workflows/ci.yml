@@ -41,17 +41,48 @@ jobs:
         run: cargo build --release -p processfork
 
   coverage:
-    name: coverage
+    name: coverage (≥ 85% lines)
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.88
         with:
           components: llvm-tools-preview
       - uses: taiki-e/install-action@cargo-llvm-cov
       - uses: Swatinem/rust-cache@v2
-      - run: cargo llvm-cov --workspace --lcov --output-path lcov.info
+      # Coverage excludes pf-py and pf-ts because those are cdylib
+      # bindings exercised from Python/TypeScript SDK tests, not from
+      # Rust. See coverage/README.md.
+      - name: measure
+        run: |
+          cargo llvm-cov --workspace \
+            --no-default-features \
+            --features="hf-live oci-live s3-live ipfs-live" \
+            --ignore-filename-regex "pf-py|pf-ts" \
+            --json --output-path coverage.json
+      - name: enforce ≥ 85% line coverage
+        run: |
+          python3 - <<'PY'
+          import json, sys
+          d = json.load(open("coverage.json"))
+          lines = d["data"][0]["totals"]["lines"]
+          pct = lines["percent"]
+          floor = 85.0
+          print(f"::notice::line coverage {pct:.2f}% ({lines['covered']}/{lines['count']})")
+          if pct < floor:
+              sys.exit(f"::error::line coverage {pct:.2f}% < {floor}% floor")
+          PY
+      # Also publish lcov to codecov for delta reporting (informational).
+      - name: lcov for codecov
+        if: always()
+        run: |
+          cargo llvm-cov --workspace \
+            --no-default-features \
+            --features="hf-live oci-live s3-live ipfs-live" \
+            --ignore-filename-regex "pf-py|pf-ts" \
+            --lcov --output-path lcov.info
       - uses: codecov/codecov-action@v4
+        if: always()
         with:
           files: lcov.info
           fail_ci_if_error: false

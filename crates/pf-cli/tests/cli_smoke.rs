@@ -249,11 +249,12 @@ fn gc_dry_run_reports_zero_unreachable_after_a_single_snapshot() {
 }
 
 #[test]
-fn push_to_hf_exits_2_unsupported_scheme() {
-    // Phase 9 wires push to a real registry; hf:// remains UnsupportedScheme
-    // until v1.0.1's `--features hf-live` lands. We snapshot a real CID
-    // first so push gets past manifest-loading and into the
-    // registry-dispatch step where hf:// returns the gated error.
+fn push_to_hf_without_token_returns_clean_backend_error() {
+    // v1.0.2: hf:// is live by default. Without a token + with a
+    // bogus repo name, the HF API returns 401 Unauthorized which we
+    // surface as a Backend error (exit code 1, not 2). The earlier
+    // "exit code 2 = UnsupportedScheme" expectation only applied to
+    // builds without --features hf-live.
     let store = TempDir::new().unwrap();
     let sandbox = TempDir::new().unwrap();
     make_sandbox(sandbox.path());
@@ -270,11 +271,14 @@ fn push_to_hf_exits_2_unsupported_scheme() {
     .unwrap()
     .trim()
     .to_owned();
+    // Point HF at an unreachable endpoint so we never accidentally
+    // hit real HF.huggingface.co during CI.
     pf(store.path())
+        .env("HF_ENDPOINT", "http://127.0.0.1:1")
         .args(["push", &cid, "hf://test/repo"])
         .assert()
-        .code(2)
-        .stderr(contains("hf://"));
+        .code(1)
+        .stderr(contains("HF"));
 }
 
 #[test]

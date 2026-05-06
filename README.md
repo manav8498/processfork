@@ -24,6 +24,7 @@
   <a href="https://github.com/manav8498/processfork/actions"><img src="https://img.shields.io/github/actions/workflow/status/manav8498/processfork/ci.yml?branch=main&label=CI" alt="CI"></a>
   <a href="#status"><img src="https://img.shields.io/badge/tests-200%20passing-brightgreen" alt="200 tests"></a>
   <a href="#status"><img src="https://img.shields.io/badge/snapshot-8%20ms-brightgreen" alt="8 ms snapshot"></a>
+  <a href="./coverage/README.md"><img src="https://img.shields.io/badge/coverage-88.96%25-brightgreen" alt="88.96% line coverage"></a>
   <a href="#install"><img src="https://img.shields.io/badge/Rust%20%2B%20Python%20%2B%20TypeScript-✓-orange" alt="Rust + Py + TS"></a>
 </p>
 
