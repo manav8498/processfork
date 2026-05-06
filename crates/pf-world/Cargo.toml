@@ -11,6 +11,12 @@ authors.workspace = true
 [lints]
 workspace = true
 
+[features]
+default = ["cdp-live"]
+# Browser DOM capture via Chrome DevTools Protocol (Playwright /
+# Puppeteer sandboxes). Off → BrowserCapture returns Unsupported.
+cdp-live = ["dep:reqwest", "dep:tokio-tungstenite", "dep:futures-util"]
+
 [dependencies]
 pf-core    = { workspace = true }
 serde      = { workspace = true }
@@ -22,6 +28,9 @@ chrono     = { workspace = true }
 rayon      = "1.10"
 walkdir    = "2.5"
 regex      = "1.11"
+reqwest    = { workspace = true, optional = true }
+tokio-tungstenite = { workspace = true, optional = true }
+futures-util = { workspace = true, optional = true }
 
 [target.'cfg(unix)'.dependencies]
 nix = { workspace = true }
@@ -32,3 +41,4 @@ which = "6.0"
 
 [dev-dependencies]
 tempfile  = { workspace = true }
+wiremock  = { workspace = true }

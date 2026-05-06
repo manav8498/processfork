@@ -34,10 +34,12 @@
 #![deny(unsafe_code)]
 #![allow(missing_docs)] // docs added per-symbol in submodules
 
+pub mod browser;
 pub mod env;
 pub mod fs;
 pub mod procs;
 
+pub use browser::{BrowserBlob, BrowserCapture, PageSnapshot};
 pub use env::EnvCapture;
 pub use fs::{FsEntryKind, FsTree, FsTreeEntry, WalkFsCapture, restore_tree};
 pub use procs::ProcsCapture;

@@ -129,6 +129,11 @@ aws-config = { version = "1.5", default-features = false, features = ["rt-tokio"
 aws-credential-types = "1.2"
 aws-smithy-runtime-api = "1.7"
 
+# Chrome DevTools Protocol over WebSocket — used by the world layer's
+# browser DOM capture (Playwright/Puppeteer sandboxes per §M2 World).
+tokio-tungstenite = { version = "0.24", features = ["rustls-tls-webpki-roots", "connect"], default-features = false }
+futures-util = { version = "0.3", default-features = false }
+
 # Bindings
 # `extension-module` is opt-in per-crate (pf-py turns it on under the
 # `extension-module` feature so `cargo test` can still link libpython).
