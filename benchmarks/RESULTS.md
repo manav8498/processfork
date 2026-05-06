@@ -122,9 +122,39 @@ upstream lands its V1 deterministic mode (tracked in
 [vllm-project/vllm#XXX](https://github.com/vllm-project/vllm/issues)
 as of 2026-05).
 
-### Llama-3-8B p99 vs spec (deferred)
+### Llama-3-8B p99 on H100 (§M1 thesis target)
 
-| metric                              | observed (operator) | budget                |
-|-------------------------------------|---------------------|-----------------------|
-| Llama-3-8B mid-stream snapshot p99  | _t.b.r._ (needs H100/A100) | ≤ 500 ms       |
-| Resumed-branch logit divergence     | _t.b.r._ (needs `--exact` mode) | bit-equal (`--exact`) |
+The §M1 spec target is "snapshot p99 ≤ 500 ms for a 380K-token
+Llama-3-70B agent on a Hopper-class GPU". The v1.0.2 deliverable
+is the wired-in lane, executable via:
+
+```bash
+# one-time
+modal secret create huggingface HF_TOKEN=hf_xxxx
+
+# the actual run (~$3 of Modal H100 credit, ~5 min)
+modal run scripts/gpu-validate-modal.py::llama8b
+```
+
+That dispatches the new `validate_llama8b` function (defined in
+`scripts/gpu-validate-modal.py`) onto a Modal H100, loads
+Llama-3.1-8B via vLLM, generates a long prompt to populate the KV
+cache, then samples 50 per-page read latencies and reports
+`p50_ms`, `p99_ms`, and the estimated full-snapshot wall.
+
+| metric                                         | status               |
+|------------------------------------------------|----------------------|
+| Lane plumbed end-to-end (validate_llama8b)     | ✅ committed         |
+| Operator HF token path (modal secret)          | ✅ documented        |
+| Actual run on Modal H100                       | _operator-runs-it_   |
+| Llama-3-70B (the §M1 model)                    | _v1.1 — needs ≥ 2× H100 NVLink_ |
+
+The Llama-3-70B run wasn't executed in v1.0.2 because:
+- Single H100 (80 GB) doesn't fit Llama-3-70B at bf16 (140 GB);
+  needs 2-way TP across 2× H100 (~$11/hr on Modal).
+- 380K-token contexts at 70B-class need a custom RoPE config
+  (Llama-3.1 ships max_position_embeddings=8192; the 380K target
+  needs a YaRN extension that's its own configuration story).
+
+The Llama-3.1-8B run on a single H100 is the v1.0.2 honest stand-in:
+same cache layout, same code path, ~10× smaller workload.
