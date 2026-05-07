@@ -126,18 +126,36 @@ def test_snapshot_via_sdk(tmp_path: Path) -> None:
     # v1.0.4 audit-fix regression: the recorded tool call must
     # actually land in the on-disk effects ledger. v1.0.3 wired the
     # SDK hook; v1.0.4 connects it from the SessionRecorder.
+    #
+    # v1.0.9 update: the SDK now emits an HMAC-chained ledger via
+    # `pf_effects::Ledger`, so the header carries
+    # `session_secret_hex` + `verification_mode` (tamper-detection
+    # mode) in addition to the v1 marker. We assert structural
+    # invariants instead of an exact dict equality so future header
+    # additions don't break this test.
     ledger_bytes = pf.read_blob(store, manifest["effects"]["ledger"])
     ledger_text = ledger_bytes.decode("utf-8")
     header_line, *entry_lines = ledger_text.strip().split("\n")
     import json as _json
 
     header = _json.loads(header_line)
-    assert header == {"kind": "effects.ledger.v1", "entries": 1}, (
-        "expected exactly one entry (the recorded Read call); got header %r" % header
+    assert header.get("kind") == "effects.ledger.v1", (
+        "ledger header missing v1 marker; got %r" % header
     )
-    assert len(entry_lines) == 1
+    # v1.0.9: SDK-generated session secret embedded in tamper-detection
+    # mode so `pf verify` can validate without an out-of-band secret.
+    assert header.get("verification_mode") == "tamper-detection"
+    assert "session_secret_hex" in header and len(header["session_secret_hex"]) >= 32
+    assert len(entry_lines) == 1, (
+        "expected exactly one entry (the recorded Read call); got %d"
+        % len(entry_lines)
+    )
     entry = _json.loads(entry_lines[0])
     assert entry["tool_id"] == "Read"
     assert entry["side_effect_class"] in {"pure", "idempotent"}
     assert entry["args_hash"].startswith("sha256:")
     assert entry["idempotency_key"].startswith("sha256:")
+    # v1.0.9 ACRFence regression: every entry must carry a non-empty
+    # session_hmac (the raw-JSONL bug used to leave them as "").
+    assert entry.get("session_hmac"), "ledger entry missing HMAC chain link"
+    assert len(entry["session_hmac"]) >= 32
