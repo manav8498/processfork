@@ -4,6 +4,116 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.0.13] — 2026-05-08
+
+Closes the two confirmed bugs and the one Python SDK lineage gap
+the v1.0.12 retest flagged. Independent matrix had been 10 PASS /
+2 ISSUE / 3 LIMITATION; v1.0.13 turns the two ISSUEs into PASS and
+makes the Python SDK lineage limitation a non-issue. The other
+limitations (live GPU host, CRIU Linux-only, absolute-symlink
+restore safety) are scope/environment notes, not bugs.
+
+### Issue 1: false merge conflicts from generated test artifacts
+
+Reproduced with `pytest`'s `__pycache__/` and `.pytest_cache/`
+landing in the captured tree on otherwise-disjoint branches. The
+v1.0.12 CLI had no ignore mechanism beyond hardcoded defaults
+(`target/`, `node_modules/`, `.git/objects/`, `.pfcid`).
+
+- **New default-extra ignore set** in `WalkFsCapture::new`:
+  `__pycache__`, `.pytest_cache`, `.mypy_cache`, `.ruff_cache`,
+  `.tox`, `.coverage`, `.venv`, `.DS_Store`, `*.pyc`, `*.pyo`.
+  Conservative — every entry is a cache by definition, never a
+  "maybe I want this" path.
+- **New `--ignore <PAT>` CLI flag** (repeatable). Plain entries
+  (`__pycache__`, `node_modules`) match path components like
+  before; glob entries (anything containing `*`/`?`/`[`, e.g.
+  `*.pyc`, `*.log`, `**/build/**`) match the relative path via
+  the new `globset` dep.
+- **New `--ignore-from <PATH>`** CLI flag — reads gitignore-style
+  rules from a file. Default: try `<fs_root>/.pfignore` then
+  `<fs_root>/.gitignore`; pass `--ignore-from /dev/null` to opt
+  out. Comments (`#`) and blank lines skipped; trailing `/`
+  stripped; gitignore negation (`!keep.pyc`) is logged-and-
+  skipped (full negation semantics arrive when an operator
+  hits the use case).
+- **New `--no-default-ignores`** to opt out of the default-extra
+  set (rare; CI auditing the cache shape, registry mirroring).
+  CVE-relevant defaults (`.git/objects`, `target`, `node_modules`,
+  `.pfcid`) are kept regardless.
+- **New `WalkFsCapture::new_without_default_ignores(root)`** and
+  **`.ignore_from(path)`** API on the underlying library.
+- Regression coverage: 4 new unit tests in `pf-world` covering
+  default-extra-ignores, glob `*.pyc` matching, opt-out, and
+  `.pfignore` file parsing; 2 new CLI integration tests in
+  `cli_smoke.rs` covering the snapshot end-to-end.
+
+### Issue 2: `pf gc --retain-recent N` left dangling log entries
+
+Reproduced: `pf log` listed CIDs after GC, but `pf checkout` on
+those CIDs failed because the layer blobs were gone. Root cause:
+`pf gc` deleted unreachable blobs from `blobs/sha256/<shard>/<hex>`
+but never the per-manifest marker files at
+`store_root/images/<cid>.json`, which is what `pf log` walks via
+`store.iter_manifests()`. The result was a referential-integrity
+hole: index says "this CID exists", CAS says "I have no idea".
+
+- **Fix**: GC now tracks the set of evicted manifest CIDs and,
+  after the blob sweep, deletes their `images/<cid>.json`
+  markers. The output line counts both: `deleted N unreachable
+  blobs (B bytes) and M stale image markers`.
+- Regression test (`gc_retain_recent_prunes_image_markers`):
+  snapshot 3 manifests → `pf gc --retain-recent 1` → assert
+  `pf log` no longer lists the 2 evicted CIDs → assert
+  `pf checkout` on an evicted CID fails AND `pf checkout` on
+  the kept CID succeeds.
+
+### Limitation 3: Python SDK didn't expose parent lineage
+
+`processfork.snapshot_filesystem` hardcoded `parents: vec![]` so
+SDK-only forks couldn't be 3-way-merged (no LCA was discoverable).
+Operators had to route through the CLI's `--parent` flag.
+
+- **New `parents: Sequence[str] | None = None`** kwarg on
+  `snapshot_filesystem`. Bad CIDs surface as `ValueError`, not
+  silent malformed manifests.
+- Regression coverage: `test_snapshot_parents_field_lands_in_manifest`
+  pins manifest.parents round-trip; `test_merge_two_forks_clean`
+  upgraded from "asserts 'no common ancestor' RuntimeError" to
+  "asserts the merge succeeds clean with cid_x as ancestor";
+  `test_snapshot_rejects_bad_parent_cid` covers the error path.
+
+### Versions
+
+- `processfork` (Rust + Python wheel): 1.0.12 → **1.0.13**
+- All 8 internal `pf-*` crate version pins: → 1.0.13
+- npm `@processfork/sdk`: 1.0.12 → **1.0.13**
+- `processfork-criu`: 1.0.12 → **1.0.13** (matches the CLI's
+  `--criu-pid` baseline)
+
+### Verification
+
+- `cargo fmt --check`, `cargo clippy --workspace --all-targets
+  -- -D warnings`, `cargo deny check`: clean.
+- `cargo test --workspace`: **211 passed** (was 204; +7 from
+  the new ignore + GC + Python-lineage integration coverage).
+- `pytest crates/pf-py/python/tests/ adapters/pf-claude-code/tests/
+  adapters/pf-criu/tests/`: **27 passed, 2 skipped** (CRIU
+  Linux-only paths still gate-skip on macOS as documented).
+- `node --test crates/pf-ts/test/smoke.mjs`: **8/8**.
+
+### Still not in scope (auditor's "limitations", left as-is)
+
+- Live PF_HAS_GPU=1 vLLM/SGLang test — Modal lane is the
+  validation; documented in v1.0.11.
+- CRIU is Linux-only by definition; macOS CI exercises Layer 1
+  + the non-Linux skip paths.
+- Absolute symlinks captured but rejected on restore for
+  sandbox-escape safety. This is the v1.0.3 "Zip Slip"
+  hardening (PF-SA-2026-001); changing it would re-open the
+  CVE. Operators who need absolute-symlink restore should
+  resolve the link target post-checkout in their own code.
+
 ## [1.0.12] — 2026-05-07
 
 Closes the four "not-yet-production-ready" items v1.0.11 made

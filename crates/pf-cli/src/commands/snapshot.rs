@@ -115,6 +115,44 @@ pub struct Args {
     #[arg(long)]
     pub resume_cmd: Option<String>,
 
+    /// Path-fragment OR glob pattern to skip during capture.
+    /// Repeatable. Plain entries (`__pycache__`, `node_modules`,
+    /// `.git/objects`) match path components; glob entries
+    /// (anything containing `*`/`?`/`[`) match path patterns
+    /// (`*.pyc`, `*.log`, `**/build/**`).
+    ///
+    /// v1.0.13 audit fix: closes the v1.0.12 retest finding
+    /// "false merge conflicts from generated test artifacts".
+    /// Default-extra ignores cover `__pycache__`, `.pytest_cache`,
+    /// `.mypy_cache`, `.ruff_cache`, `.tox`, `.coverage`, `.venv`,
+    /// `.DS_Store`, `*.pyc`, `*.pyo` automatically; pass
+    /// `--no-default-ignores` to opt out.
+    #[arg(long)]
+    pub ignore: Vec<String>,
+
+    /// Read gitignore-style ignore rules from this file (lines
+    /// starting with `#` are comments; blank lines skipped;
+    /// trailing `/` stripped). Default: try `<fs_root>/.pfignore`,
+    /// then `<fs_root>/.gitignore` if neither file exists, no-op.
+    /// Pass `--ignore-from /dev/null` to opt out of the default
+    /// search.
+    ///
+    /// v1.0.13: gitignore negation (`!keep.pyc`) is logged and
+    /// skipped — full negation semantics arrive when an operator
+    /// hits the use case.
+    #[arg(long)]
+    pub ignore_from: Option<PathBuf>,
+
+    /// Suppress the v1.0.13 default-extra ignore set
+    /// (`__pycache__`, `.pytest_cache`, `*.pyc`, …). Use only when
+    /// you genuinely need byte-for-byte capture of every file in
+    /// the source tree (CI auditing the set itself, registry
+    /// mirroring). The CVE-relevant defaults from v1.0.0 onwards
+    /// (`.git/objects`, `target`, `node_modules`, `.pfcid`) are
+    /// kept regardless.
+    #[arg(long)]
+    pub no_default_ignores: bool,
+
     /// PID to capture via the processfork-criu adapter (Linux only).
     /// When set, the world layer's `procs` blob is `procs.criu.v1`
     /// (a real CRIU image bundle) instead of `procs.unsupported.v1`
@@ -225,9 +263,37 @@ pub fn run(store_root: &Path, args: Args) -> anyhow::Result<()> {
         eprintln!("warning: --pause-pid is unix-only; ignoring on this OS");
     }
 
-    let fs_digest = pf_world::WalkFsCapture::new(&args.fs_root)
-        .use_apfs_clone(cfg!(target_os = "macos"))
-        .capture(&blobs)?;
+    // FS capture with v1.0.13 ignore plumbing.
+    //
+    // Ignore precedence (deepest = highest):
+    //  1. WalkFsCapture's CVE-relevant + v1.0.13 default-extra
+    //     ignores (unless --no-default-ignores).
+    //  2. Lines from --ignore-from <path>, or from
+    //     <fs_root>/.pfignore, or from <fs_root>/.gitignore
+    //     (first that exists; --ignore-from explicitly set
+    //     skips the auto-discovery).
+    //  3. Repeated --ignore <pat> flags.
+    let mut walker = if args.no_default_ignores {
+        pf_world::WalkFsCapture::new_without_default_ignores(&args.fs_root)
+    } else {
+        pf_world::WalkFsCapture::new(&args.fs_root)
+    }
+    .use_apfs_clone(cfg!(target_os = "macos"));
+    if let Some(p) = &args.ignore_from {
+        walker = walker.ignore_from(p)?;
+    } else {
+        let pfignore = args.fs_root.join(".pfignore");
+        let gitignore = args.fs_root.join(".gitignore");
+        if pfignore.exists() {
+            walker = walker.ignore_from(&pfignore)?;
+        } else if gitignore.exists() {
+            walker = walker.ignore_from(&gitignore)?;
+        }
+    }
+    for pat in &args.ignore {
+        walker = walker.ignore(pat);
+    }
+    let fs_digest = walker.capture(&blobs)?;
     let mut env_capture = pf_world::EnvCapture::new();
     // v1.0.7 audit fix: secret-shaped env vars are redacted by
     // default. Operator can disable via --no-default-scrub if they

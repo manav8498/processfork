@@ -210,18 +210,73 @@ def test_merge_two_forks_clean(tmp_path: Path) -> None:
     cid_x = processfork.snapshot_filesystem(
         store, agent_kind="t", fs_root=str(sandbox_x), env={}, messages=[]
     )
-    # For merge to find an LCA we need parents wired; the v1 SDK
-    # snapshot_filesystem creates root manifests (no parents). Verify
-    # the engine's no-LCA error surfaces cleanly.
+    # v1.0.13: SDK snapshot now exposes ``parents=...`` lineage so a
+    # 3-way merge over two SDK-only forks can find the common
+    # ancestor. Prior versions hardcoded an empty parents list and
+    # required the operator to route through the CLI for any merge
+    # to work.
     cid_a = processfork.snapshot_filesystem(
-        store, agent_kind="t", fs_root=str(sandbox_a), env={}, messages=[]
+        store,
+        agent_kind="t",
+        fs_root=str(sandbox_a),
+        env={},
+        messages=[],
+        parents=[cid_x],
     )
     cid_b = processfork.snapshot_filesystem(
-        store, agent_kind="t", fs_root=str(sandbox_b), env={}, messages=[]
+        store,
+        agent_kind="t",
+        fs_root=str(sandbox_b),
+        env={},
+        messages=[],
+        parents=[cid_x],
     )
-    with pytest.raises(RuntimeError, match="no common ancestor"):
-        processfork.merge(store, cid_a, cid_b)
+    # Disjoint edits + a real common ancestor → clean merge.
+    report = processfork.merge(store, cid_a, cid_b)
+    assert report["overall"] == "clean"
+    assert report["ancestor"] == cid_x
+
     # Self-merge: ancestor = self, clean.
     report = processfork.merge(store, cid_a, cid_a)
     assert report["overall"] == "clean"
     assert report["ancestor"] == cid_a
+
+
+def test_snapshot_parents_field_lands_in_manifest(tmp_path: Path) -> None:
+    """v1.0.13: parents= must round-trip into manifest.parents
+    so pf log walks the DAG correctly and pf merge finds the LCA."""
+    sandbox = tmp_path / "sandbox"
+    _make_sandbox(sandbox)
+    store = processfork.PfStore.open(str(tmp_path / "store"))
+    parent_cid = processfork.snapshot_filesystem(
+        store, agent_kind="t", fs_root=str(sandbox), env={}, messages=[]
+    )
+    child_cid = processfork.snapshot_filesystem(
+        store,
+        agent_kind="t",
+        fs_root=str(sandbox),
+        env={},
+        messages=[],
+        parents=[parent_cid],
+    )
+    parent_manifest = processfork.read_manifest(store, parent_cid)
+    child_manifest = processfork.read_manifest(store, child_cid)
+    assert parent_manifest["parents"] == []
+    assert child_manifest["parents"] == [parent_cid]
+
+
+def test_snapshot_rejects_bad_parent_cid(tmp_path: Path) -> None:
+    """A garbage parent CID must surface as ValueError, not produce
+    a malformed manifest."""
+    sandbox = tmp_path / "sandbox"
+    _make_sandbox(sandbox)
+    store = processfork.PfStore.open(str(tmp_path / "store"))
+    with pytest.raises(ValueError, match="parent CID"):
+        processfork.snapshot_filesystem(
+            store,
+            agent_kind="t",
+            fs_root=str(sandbox),
+            env={},
+            messages=[],
+            parents=["not-a-real-cid"],
+        )

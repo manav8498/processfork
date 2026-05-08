@@ -775,6 +775,203 @@ fn snapshot_scrub_env_redacts_matching_keys() {
     );
 }
 
+/// v1.0.13: pf gc --retain-recent N must prune both layer blobs
+/// AND `images/<cid>.json` markers for evicted manifests. The
+/// v1.0.12 retest reproduced "pf log lists CIDs whose pf checkout
+/// fails because their blobs are gone". After v1.0.13, pf log no
+/// longer lists evicted CIDs at all.
+#[test]
+fn gc_retain_recent_prunes_image_markers() {
+    let store = TempDir::new().unwrap();
+    let sandbox = TempDir::new().unwrap();
+    make_sandbox(sandbox.path());
+
+    // Create 3 distinct snapshots so retain_recent has something to evict.
+    let mut cids = Vec::new();
+    for i in 0..3 {
+        std::fs::write(
+            sandbox.path().join("README.md"),
+            format!("# v{i}\n").as_bytes(),
+        )
+        .unwrap();
+        let cid = String::from_utf8(
+            pf(store.path())
+                .args(["snapshot", "--agent-id", "t", "--fs-root"])
+                .arg(sandbox.path())
+                .assert()
+                .success()
+                .get_output()
+                .stdout
+                .clone(),
+        )
+        .unwrap()
+        .trim()
+        .to_owned();
+        cids.push(cid);
+    }
+
+    // Sanity: pf log lists all 3 before GC.
+    let log_before = pf(store.path())
+        .arg("log")
+        .assert()
+        .success()
+        .get_output()
+        .clone();
+    let log_before_text = String::from_utf8(log_before.stdout).unwrap();
+    for cid in &cids {
+        assert!(
+            log_before_text.contains(cid),
+            "pf log should list {cid} before GC"
+        );
+    }
+
+    // GC keeping only the most recent 1.
+    pf(store.path())
+        .args(["gc", "--retain-recent", "1"])
+        .assert()
+        .success()
+        .stdout(contains("stale image markers"));
+
+    // After GC, pf log must NOT list the two evicted CIDs.
+    let log_after = pf(store.path())
+        .arg("log")
+        .assert()
+        .success()
+        .get_output()
+        .clone();
+    let log_after_text = String::from_utf8(log_after.stdout).unwrap();
+    let evicted = &cids[..2];
+    let kept = &cids[2];
+    for evicted_cid in evicted {
+        assert!(
+            !log_after_text.contains(evicted_cid),
+            "v1.0.13 regression: pf log still lists evicted CID {evicted_cid} \
+             (would dangle pf checkout)"
+        );
+    }
+    assert!(
+        log_after_text.contains(kept),
+        "pf log must still list the retained CID {kept}"
+    );
+
+    // Belt-and-suspenders: pf checkout on an evicted CID must fail
+    // (the blobs are gone). pf checkout on the kept CID must
+    // succeed (its blobs survived GC).
+    let scratch = TempDir::new().unwrap();
+    pf(store.path())
+        .args(["checkout", &evicted[0], "--into"])
+        .arg(scratch.path().join("evicted-out"))
+        .assert()
+        .failure();
+    pf(store.path())
+        .args(["checkout", kept, "--into"])
+        .arg(scratch.path().join("kept-out"))
+        .assert()
+        .success();
+}
+
+/// v1.0.13: pf snapshot --ignore <pat> filters generated test
+/// artefacts so disjoint branches don't conflict-merge on
+/// `__pycache__` or `.pytest_cache`. The v1.0.12 retest reproduced
+/// false merge conflicts from those exact directories. The v1.0.13
+/// default-extra ignore set covers them; the test pins the
+/// behavior so it doesn't regress.
+#[test]
+fn snapshot_default_ignores_skip_python_caches() {
+    use pf_core::digest::Digest256;
+    let store = TempDir::new().unwrap();
+    let sandbox = TempDir::new().unwrap();
+    std::fs::create_dir_all(sandbox.path().join("src")).unwrap();
+    std::fs::write(sandbox.path().join("src/main.py"), "print('hi')\n").unwrap();
+    // Common pytest collateral that the v1.0.12 retest flagged.
+    std::fs::create_dir_all(sandbox.path().join("src/__pycache__")).unwrap();
+    std::fs::write(
+        sandbox.path().join("src/__pycache__/main.cpython-313.pyc"),
+        b"\x03\xf3\r\n",
+    )
+    .unwrap();
+    std::fs::create_dir_all(sandbox.path().join(".pytest_cache")).unwrap();
+    std::fs::write(
+        sandbox.path().join(".pytest_cache/CACHEDIR.TAG"),
+        b"Signature: 8a477f597d28d172789f06886806bc55",
+    )
+    .unwrap();
+
+    let cid_str = String::from_utf8(
+        pf(store.path())
+            .args(["snapshot", "--agent-id", "t", "--fs-root"])
+            .arg(sandbox.path())
+            .assert()
+            .success()
+            .get_output()
+            .stdout
+            .clone(),
+    )
+    .unwrap()
+    .trim()
+    .to_owned();
+
+    // Walk the manifest's FS tree and confirm none of the cache
+    // paths leaked through.
+    let store_handle = pf_core::store::PfStore::open(store.path()).unwrap();
+    let cid = Digest256::parse(&cid_str).unwrap();
+    let manifest = store_handle.get_manifest(&cid).unwrap();
+    let blobs = store_handle.blobs_arc();
+    let fs_blob = blobs.get(&manifest.world.fs).unwrap();
+    let fs_text = String::from_utf8_lossy(&fs_blob);
+    assert!(
+        fs_text.contains("src/main.py"),
+        "real source file must be captured: {fs_text}"
+    );
+    assert!(
+        !fs_text.contains("__pycache__"),
+        "v1.0.13 regression: __pycache__ leaked into manifest fs tree (false-conflict bug)"
+    );
+    assert!(
+        !fs_text.contains(".pytest_cache"),
+        "v1.0.13 regression: .pytest_cache leaked into manifest fs tree (false-conflict bug)"
+    );
+}
+
+/// v1.0.13: --no-default-ignores opts back into capturing cache
+/// dirs (rare; CI auditing the cache shape itself).
+#[test]
+fn snapshot_no_default_ignores_includes_caches() {
+    use pf_core::digest::Digest256;
+    let store = TempDir::new().unwrap();
+    let sandbox = TempDir::new().unwrap();
+    std::fs::create_dir_all(sandbox.path().join("__pycache__")).unwrap();
+    std::fs::write(sandbox.path().join("__pycache__/m.pyc"), b"x").unwrap();
+    let cid_str = String::from_utf8(
+        pf(store.path())
+            .args([
+                "snapshot",
+                "--agent-id",
+                "t",
+                "--no-default-ignores",
+                "--fs-root",
+            ])
+            .arg(sandbox.path())
+            .assert()
+            .success()
+            .get_output()
+            .stdout
+            .clone(),
+    )
+    .unwrap()
+    .trim()
+    .to_owned();
+    let store_handle = pf_core::store::PfStore::open(store.path()).unwrap();
+    let cid = Digest256::parse(&cid_str).unwrap();
+    let manifest = store_handle.get_manifest(&cid).unwrap();
+    let fs_blob = store_handle.blobs_arc().get(&manifest.world.fs).unwrap();
+    let fs_text = String::from_utf8_lossy(&fs_blob);
+    assert!(
+        fs_text.contains("__pycache__"),
+        "with --no-default-ignores, caches must round-trip: {fs_text}"
+    );
+}
+
 /// v1.0.12: full pf merge → pf merge-resolve → pf merge-finalize round-trip.
 /// Snapshot a common ancestor X, then snapshot two divergent edits A and B
 /// (each declaring X as parent). Merging A and B must report a conflict;

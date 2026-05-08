@@ -62,24 +62,79 @@ pub struct WalkFsCapture {
     use_apfs_clone: bool,
     follow_symlinks: bool,
     ignore: Vec<String>,
+    /// v1.0.13 audit fix: glob-style ignore patterns alongside the
+    /// segment-match ones. Built lazily from `ignore` entries that
+    /// contain glob meta-characters (`*`, `?`, `[`).
+    ignore_globs: Vec<globset::GlobMatcher>,
 }
+
+/// v1.0.13 default-ignore set extension. The previous default set
+/// covered build directories (`target`, `node_modules`, `.git/objects`)
+/// and the `.pfcid` sentinel. The v1.0.12 retest reproduced **false
+/// merge conflicts** when `__pycache__/` and `.pytest_cache/`
+/// landed in the captured tree from a `pytest` run on otherwise
+/// disjoint branches. This set adds the universally-cache directory
+/// names that should never be source-of-truth, plus common Python
+/// bytecode patterns. Conservative: nothing here is ever a "maybe
+/// I want this" — they are all caches by definition.
+const DEFAULT_EXTRA_IGNORES: &[&str] = &[
+    "__pycache__",
+    ".pytest_cache",
+    ".mypy_cache",
+    ".ruff_cache",
+    ".tox",
+    ".coverage",
+    ".venv",
+    ".DS_Store",
+    "*.pyc",
+    "*.pyo",
+];
 
 impl WalkFsCapture {
     /// Capture the directory rooted at `root`.
     pub fn new(root: impl AsRef<Path>) -> Self {
+        let mut ignore: Vec<String> = vec![
+            ".git/objects".into(),
+            "target".into(),
+            "node_modules".into(),
+            // `.pfcid` is the sentinel `pf checkout` writes so a
+            // subsequent `pf snapshot` knows its parent CID. We
+            // skip it here so it never lands in the captured tree.
+            ".pfcid".into(),
+        ];
+        for extra in DEFAULT_EXTRA_IGNORES {
+            ignore.push((*extra).to_owned());
+        }
+        let ignore_globs = compile_globs(&ignore);
         Self {
             root: root.as_ref().to_path_buf(),
             use_apfs_clone: false,
             follow_symlinks: false,
-            ignore: vec![
-                ".git/objects".into(),
-                "target".into(),
-                "node_modules".into(),
-                // `.pfcid` is the sentinel `pf checkout` writes so a
-                // subsequent `pf snapshot` knows its parent CID. We
-                // skip it here so it never lands in the captured tree.
-                ".pfcid".into(),
-            ],
+            ignore,
+            ignore_globs,
+        }
+    }
+
+    /// Build a capturer that does NOT carry the v1.0.13 default-extra
+    /// ignore set (`__pycache__`, `.pytest_cache`, `*.pyc`, …).
+    /// Operators who want byte-for-byte capture of every file in
+    /// the source tree (rare; CI auditing the set itself; building
+    /// a registry mirror) call this. Default callers should use
+    /// [`WalkFsCapture::new`] which has the safe set.
+    pub fn new_without_default_ignores(root: impl AsRef<Path>) -> Self {
+        let ignore: Vec<String> = vec![
+            ".git/objects".into(),
+            "target".into(),
+            "node_modules".into(),
+            ".pfcid".into(),
+        ];
+        let ignore_globs = compile_globs(&ignore);
+        Self {
+            root: root.as_ref().to_path_buf(),
+            use_apfs_clone: false,
+            follow_symlinks: false,
+            ignore,
+            ignore_globs,
         }
     }
 
@@ -102,12 +157,66 @@ impl WalkFsCapture {
         self
     }
 
-    /// Add a path-fragment to the ignore list. Default ignores: `.git/objects`,
-    /// `target`, `node_modules`.
+    /// Add a path-fragment OR glob pattern to the ignore list.
+    ///
+    /// - Plain entries (`target`, `__pycache__`, `.git/objects`) are
+    ///   matched as path-component sequences, exactly as before.
+    /// - Glob entries (anything containing `*`, `?`, `[`) are matched
+    ///   against the relative path via [`globset::Glob`]. Common
+    ///   patterns: `*.pyc`, `*.log`, `**/build/**`.
+    ///
+    /// v1.0.13 added glob support; segment-match semantics for plain
+    /// entries are unchanged.
     #[must_use]
     pub fn ignore(mut self, fragment: impl Into<String>) -> Self {
-        self.ignore.push(fragment.into());
+        let entry: String = fragment.into();
+        if has_glob_chars(&entry)
+            && let Ok(g) = globset::Glob::new(&entry)
+        {
+            self.ignore_globs.push(g.compile_matcher());
+        }
+        self.ignore.push(entry);
         self
+    }
+
+    /// Read a `.gitignore`/`.pfignore`-style file and apply each
+    /// non-comment, non-empty line as an ignore entry. Lines ending
+    /// with `/` have the slash stripped (gitignore directory marker).
+    /// Lines starting with `!` (gitignore negation) are skipped with
+    /// a `tracing::warn!` — this is a v1.0.13 limitation; full
+    /// gitignore semantics with negation arrive when an operator
+    /// hits the use case.
+    ///
+    /// Returns Ok(self) even if the file doesn't exist (so
+    /// `.ignore_from(".pfignore")` is safe to chain unconditionally).
+    /// Returns the underlying io::Error only if the file exists but
+    /// can't be read (permissions, etc.).
+    pub fn ignore_from(mut self, path: impl AsRef<Path>) -> std::io::Result<Self> {
+        let path = path.as_ref();
+        if !path.exists() {
+            return Ok(self);
+        }
+        let content = std::fs::read_to_string(path)?;
+        for raw in content.lines() {
+            let line = raw.trim();
+            if line.is_empty() || line.starts_with('#') {
+                continue;
+            }
+            if line.starts_with('!') {
+                tracing::warn!(
+                    "ignoring gitignore negation in {}: {} (negation not yet supported in v1.0.13)",
+                    path.display(),
+                    line
+                );
+                continue;
+            }
+            let trimmed = line.trim_start_matches('/').trim_end_matches('/');
+            if trimmed.is_empty() {
+                continue;
+            }
+            self = self.ignore(trimmed);
+        }
+        Ok(self)
     }
 
     /// Run the capture. Returns the digest of the `fs.tree.v1` blob.
@@ -134,7 +243,13 @@ impl WalkFsCapture {
                 // path-component to each ignore entry exactly. Multi-
                 // segment ignores like ".git/objects" still work via
                 // path-prefix containment of the joined segments.
+                //
+                // v1.0.13: glob entries (containing `*`/`?`/`[`) are
+                // also matched against the path RELATIVE to walk_root,
+                // so `*.pyc` correctly skips `src/foo.pyc`.
+                let rel = e.path().strip_prefix(&walk_root).unwrap_or(e.path());
                 !path_matches_any_ignore(e.path(), &self.ignore)
+                    && !path_matches_any_glob(rel, &self.ignore_globs)
             })
             .filter_map(std::result::Result::ok)
             .collect();
@@ -311,6 +426,56 @@ pub fn restore_tree(
 /// to "target", but does NOT match "targeted" or "untargeted".
 /// Multi-segment ignores like ".git/objects" match consecutive
 /// component runs.
+/// True if `entry` looks like a glob pattern (contains `*`, `?`,
+/// or `[`). v1.0.13: used to decide whether to compile a glob
+/// matcher or treat the entry as a plain segment-match.
+fn has_glob_chars(entry: &str) -> bool {
+    entry.contains('*') || entry.contains('?') || entry.contains('[')
+}
+
+/// Compile every glob-style entry in `ignores` into a `GlobMatcher`.
+/// Plain segment entries are skipped (handled by
+/// `path_matches_any_ignore`). Invalid globs are silently dropped —
+/// the operator's `--ignore` arg already passed clap parsing, so a
+/// malformed glob is a user error worth surfacing via tracing but
+/// not worth aborting capture for.
+fn compile_globs(ignores: &[String]) -> Vec<globset::GlobMatcher> {
+    let mut out = Vec::new();
+    for ign in ignores {
+        if !has_glob_chars(ign) {
+            continue;
+        }
+        match globset::Glob::new(ign) {
+            Ok(g) => out.push(g.compile_matcher()),
+            Err(e) => tracing::warn!("ignore: invalid glob {ign:?}: {e}"),
+        }
+    }
+    out
+}
+
+/// True if any compiled glob matches `relative_path` (the path
+/// stripped of `walk_root`). Globs match the path with forward
+/// slashes — globset normalises this internally.
+fn path_matches_any_glob(relative_path: &Path, globs: &[globset::GlobMatcher]) -> bool {
+    if globs.is_empty() {
+        return false;
+    }
+    for g in globs {
+        if g.is_match(relative_path) {
+            return true;
+        }
+        // Also match against just the file name so `*.pyc` matches
+        // `src/foo.pyc` even on platforms where globset doesn't
+        // automatically descend on a non-`**` glob.
+        if let Some(name) = relative_path.file_name()
+            && g.is_match(Path::new(name))
+        {
+            return true;
+        }
+    }
+    false
+}
+
 fn path_matches_any_ignore(path: &Path, ignores: &[String]) -> bool {
     let comps: Vec<&str> = path
         .components()
@@ -700,6 +865,126 @@ mod tests {
         assert!(
             !paths.iter().any(|p| p.starts_with("target/")),
             "target/ subtree must be filtered (was: {paths:?})"
+        );
+    }
+
+    /// v1.0.13: the v1.0.12 retest reproduced false merge conflicts
+    /// when `__pycache__/` and `.pytest_cache/` landed in the
+    /// captured tree from a `pytest` run on otherwise-disjoint
+    /// branches. Default-extra ignores now skip them.
+    #[test]
+    fn default_ignores_skip_python_cache_dirs() {
+        let src = TempDir::new().unwrap();
+        write(src.path(), "src/main.py", b"print('hi')\n");
+        write(
+            src.path(),
+            "src/__pycache__/main.cpython-313.pyc",
+            b"\x03\xf3\r\n", // pyc magic-ish
+        );
+        write(src.path(), ".pytest_cache/CACHEDIR.TAG", b"Signature: ...");
+        write(src.path(), ".mypy_cache/3.13/CACHEDIR.TAG", b"...");
+        write(src.path(), ".ruff_cache/0.6.0/foo", b"x");
+        write(src.path(), ".venv/bin/python", b"#!/...\n");
+        let blobs: Arc<dyn BlobStore> = Arc::new(MemBlobStore::new());
+        let cid = WalkFsCapture::new(src.path()).capture(&blobs).unwrap();
+        let tree: FsTree = serde_json::from_slice(&blobs.get(&cid).unwrap()).unwrap();
+        let paths: Vec<&str> = tree.entries.iter().map(|e| e.path.as_str()).collect();
+
+        assert!(
+            paths.contains(&"src/main.py"),
+            "real source file must survive: {paths:?}"
+        );
+        for cache_pat in [
+            "__pycache__",
+            ".pytest_cache",
+            ".mypy_cache",
+            ".ruff_cache",
+            ".venv",
+        ] {
+            assert!(
+                !paths.iter().any(|p| p.contains(cache_pat)),
+                "{cache_pat} must be filtered by default; got: {paths:?}"
+            );
+        }
+    }
+
+    /// v1.0.13: glob-pattern entries on the ignore list match
+    /// against the path. The default set includes `*.pyc` so a
+    /// stray `.pyc` outside `__pycache__/` (e.g. shipped artefacts)
+    /// is also skipped.
+    #[test]
+    #[allow(clippy::case_sensitive_file_extension_comparisons)]
+    fn glob_patterns_match_files_anywhere_in_tree() {
+        let src = TempDir::new().unwrap();
+        write(src.path(), "src/main.py", b"keep");
+        write(src.path(), "src/legacy.pyc", b"skip-by-glob");
+        write(src.path(), "build/output.pyc", b"skip-by-glob");
+        let blobs: Arc<dyn BlobStore> = Arc::new(MemBlobStore::new());
+        let cid = WalkFsCapture::new(src.path()).capture(&blobs).unwrap();
+        let tree: FsTree = serde_json::from_slice(&blobs.get(&cid).unwrap()).unwrap();
+        let paths: Vec<&str> = tree.entries.iter().map(|e| e.path.as_str()).collect();
+        assert!(
+            paths.contains(&"src/main.py"),
+            "non-glob source must survive: {paths:?}"
+        );
+        assert!(
+            !paths.iter().any(|p| p.ends_with(".pyc")),
+            "*.pyc glob must filter every .pyc anywhere: {paths:?}"
+        );
+    }
+
+    /// v1.0.13: opt out of the default-extra set when you genuinely
+    /// need to capture cache files (CI auditing the cache shape, a
+    /// registry mirror, etc.).
+    #[test]
+    fn opt_out_of_default_ignores_captures_caches() {
+        let src = TempDir::new().unwrap();
+        write(src.path(), "__pycache__/foo.pyc", b"x");
+        write(src.path(), "src/main.py", b"hi");
+        let blobs: Arc<dyn BlobStore> = Arc::new(MemBlobStore::new());
+        let cid = WalkFsCapture::new_without_default_ignores(src.path())
+            .capture(&blobs)
+            .unwrap();
+        let tree: FsTree = serde_json::from_slice(&blobs.get(&cid).unwrap()).unwrap();
+        let paths: Vec<&str> = tree.entries.iter().map(|e| e.path.as_str()).collect();
+        assert!(
+            paths.iter().any(|p| p.contains("__pycache__")),
+            "without default ignores, __pycache__ must round-trip: {paths:?}"
+        );
+    }
+
+    /// v1.0.13: `.ignore_from(".pfignore")` reads gitignore-style
+    /// rules from the captured tree. Common case: operator drops
+    /// project-specific patterns into a `.pfignore` file alongside
+    /// the source.
+    #[test]
+    #[allow(clippy::case_sensitive_file_extension_comparisons)]
+    fn ignore_from_file_applies_each_line() {
+        let src = TempDir::new().unwrap();
+        write(src.path(), "src/main.py", b"keep");
+        write(src.path(), "secrets/api.key", b"private");
+        write(src.path(), "logs/today.log", b"verbose");
+        write(
+            src.path(),
+            ".pfignore",
+            b"# project ignores\nsecrets\n*.log\n",
+        );
+        let blobs: Arc<dyn BlobStore> = Arc::new(MemBlobStore::new());
+        let cid = WalkFsCapture::new(src.path())
+            .ignore_from(src.path().join(".pfignore"))
+            .unwrap()
+            .capture(&blobs)
+            .unwrap();
+        let tree: FsTree = serde_json::from_slice(&blobs.get(&cid).unwrap()).unwrap();
+        let paths: Vec<&str> = tree.entries.iter().map(|e| e.path.as_str()).collect();
+        assert!(paths.contains(&"src/main.py"));
+        assert!(
+            !paths.iter().any(|p| p.starts_with("secrets/")),
+            "secrets/ should be filtered by .pfignore: {paths:?}"
+        );
+        assert!(
+            !paths.iter().any(|p| p.ends_with(".log")),
+            "*.log glob from .pfignore should filter logs: {paths:?}"
         );
     }
 }

@@ -68,6 +68,7 @@ def snapshot_filesystem(
     effects: Sequence[_EffectEntry] | None = None,
     default_scrub_env: bool = True,
     scrub_env: Sequence[str] | None = None,
+    parents: Sequence[str] | None = None,
 ) -> str:
     """Capture FS sandbox + env + chat trace into a `.pfimg`. Returns CID.
 
@@ -94,6 +95,13 @@ def snapshot_filesystem(
     out-of-band session secret (real ACRFence). Without it the SDK
     generates a fresh per-snapshot secret and embeds the hex in the
     blob header for tamper-detection mode.
+
+    ``parents`` (default ``None``, v1.0.13) — list of parent CIDs to
+    record in the manifest's lineage. Set this when snapshotting
+    divergent branches so ``pf merge`` can find the common ancestor.
+    Prior versions of the SDK hardcoded an empty parents list, so
+    SDK-only forks couldn't be 3-way-merged unless the operator
+    routed through the CLI (which has had ``--parent`` since v1.0.3).
     """
     ...
 

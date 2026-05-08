@@ -25,17 +25,40 @@ pub struct Args {
 pub fn run(store_root: &Path, args: Args) -> anyhow::Result<()> {
     let store = PfStore::open(store_root)?;
 
-    let mut manifests: Vec<(Digest256, Manifest)> = store.iter_manifests()?.collect();
-    // Newest first (descending) — `sort_by_key` + `Reverse` is the
-    // clippy-blessed form, equivalent to the prior closure.
-    manifests.sort_by_key(|(_, m)| std::cmp::Reverse(m.created_at));
-    if args.retain_recent > 0 && manifests.len() > args.retain_recent {
-        manifests.truncate(args.retain_recent);
-    }
+    // Materialize the full manifest universe BEFORE truncation —
+    // we need the list of evicted CIDs (those we're NOT keeping) so
+    // we can also delete their `images/<cid>.json` markers. The
+    // v1.0.12 retest reproduced "pf gc --retain-recent N leaves
+    // dangling log entries": GC was deleting the layer blobs of
+    // older manifests but never the marker files that `pf log`
+    // walks, so `pf log` happily listed CIDs whose `pf checkout`
+    // would fail. v1.0.13 fix.
+    let mut all_manifests: Vec<(Digest256, Manifest)> = store.iter_manifests()?.collect();
+    all_manifests.sort_by_key(|(_, m)| std::cmp::Reverse(m.created_at));
+
+    let kept: Vec<(Digest256, Manifest)> =
+        if args.retain_recent > 0 && all_manifests.len() > args.retain_recent {
+            all_manifests
+                .iter()
+                .take(args.retain_recent)
+                .cloned()
+                .collect()
+        } else {
+            all_manifests.clone()
+        };
+
+    // The set of manifest CIDs we are evicting — used for marker
+    // pruning AFTER the blob sweep.
+    let kept_cids: HashSet<Digest256> = kept.iter().map(|(cid, _)| cid.clone()).collect();
+    let evicted_cids: Vec<Digest256> = all_manifests
+        .iter()
+        .filter(|(cid, _)| !kept_cids.contains(cid))
+        .map(|(cid, _)| cid.clone())
+        .collect();
 
     let blobs: Arc<dyn BlobStore> = store.blobs_arc();
     let mut reachable: HashSet<Digest256> = HashSet::new();
-    for (cid, m) in &manifests {
+    for (cid, m) in &kept {
         reachable.insert(cid.clone());
         gather_layer_digests(m, &mut reachable);
         // Plus the JSON of the manifest itself.
@@ -79,15 +102,37 @@ pub fn run(store_root: &Path, args: Args) -> anyhow::Result<()> {
             }
         }
     }
+
+    // v1.0.13 fix: prune the `images/<cid>.json` markers for every
+    // evicted manifest so `pf log` no longer lists CIDs whose
+    // layer blobs are gone. Without this, retain_recent is a
+    // referential-integrity bug — the index says "this CID
+    // exists" while the CAS says "I have no idea what you're
+    // talking about".
+    let images_dir = store.root().join("images");
+    let mut marker_count: u64 = 0;
+    if images_dir.exists() {
+        for cid in &evicted_cids {
+            let marker = images_dir.join(format!("{}.json", cid.hex()));
+            if marker.exists() {
+                marker_count += 1;
+                if !args.dry_run {
+                    let _ = std::fs::remove_file(&marker);
+                }
+            }
+        }
+    }
+
     println!(
-        "{} {} unreachable blobs ({} bytes)",
+        "{} {} unreachable blobs ({} bytes) and {} stale image markers",
         if args.dry_run {
             "would delete"
         } else {
             "deleted"
         },
         unreachable_count,
-        bytes_freed
+        bytes_freed,
+        marker_count,
     );
     Ok(())
 }

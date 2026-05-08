@@ -170,6 +170,7 @@ const DEFAULT_ENV_SCRUB: &str =
 #[pyo3(signature = (
     store, agent_kind, fs_root, env, messages,
     effects = None, default_scrub_env = true, scrub_env = None,
+    parents = None,
 ))]
 // pyo3 binding shims map a Python kwargs surface 1:1 onto positional
 // Rust arguments; splitting into a builder would obscure the
@@ -184,6 +185,7 @@ pub fn snapshot_filesystem(
     effects: Option<Bound<'_, PyList>>,
     default_scrub_env: bool,
     scrub_env: Option<Vec<String>>,
+    parents: Option<Vec<String>>,
 ) -> PyResult<String> {
     let blobs: Arc<dyn BlobStore> = store.inner.blobs_arc();
 
@@ -444,7 +446,18 @@ pub fn snapshot_filesystem(
             messages: trace_digest,
         },
         created_at: chrono::Utc::now(),
-        parents: vec![],
+        // v1.0.13 audit fix: prior versions hard-coded `parents:
+        // vec![]`, so SDK-only divergent snapshots could never be
+        // 3-way-merged (no common ancestor was discoverable). The
+        // CLI has had `--parent <CID>` since v1.0.3; the Python SDK
+        // now exposes the same surface so adapters that fork via
+        // the SDK can record lineage.
+        parents: parents
+            .unwrap_or_default()
+            .into_iter()
+            .map(|s| Digest256::parse(&s))
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(|e| PyValueError::new_err(format!("bad parent CID: {e}")))?,
     };
     let cid = store.inner.put_manifest(&manifest).map_err(map_err)?;
     Ok(cid.as_str().to_owned())

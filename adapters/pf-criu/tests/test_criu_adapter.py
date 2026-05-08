@@ -36,7 +36,7 @@ import processfork_criu as pfc
 def test_module_version_matches_pyproject() -> None:
     """Adapter version must match the package version in
     pyproject.toml so wheels and runtime introspection agree."""
-    assert pfc.__version__ == "1.0.12"
+    assert pfc.__version__ == "1.0.13"
 
 
 def test_procs_kind_constant_is_v1() -> None:

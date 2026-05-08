@@ -39,6 +39,14 @@ struct Cli {
     command: Command,
 }
 
+// `Snapshot` carries 9 ProcessFork-specific knobs (scrub-env,
+// effects-from-jsonl, parent, pause-pid, quiesce-cmd, resume-cmd,
+// criu-pid, ignore, ignore-from, …) so its Args is ~288 bytes
+// while sibling subcommands are <40 bytes. Boxing one variant to
+// satisfy `clippy::large_enum_variant` would just shuffle the
+// allocation; the enum is dispatched once per `pf` invocation, so
+// the size-mismatch cost is irrelevant in practice. Allow.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Subcommand)]
 enum Command {
     /// Capture a sandbox + chat trace into a `.pfimg`.

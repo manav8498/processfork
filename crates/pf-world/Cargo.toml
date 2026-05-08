@@ -28,6 +28,11 @@ chrono     = { workspace = true }
 rayon      = "1.10"
 walkdir    = "2.5"
 regex      = "1.11"
+# v1.0.13: glob-pattern ignore support for `WalkFsCapture` (closes
+# the v1.0.12 retest finding "false merge conflicts from generated
+# test artifacts" — operators can now drop `__pycache__/`, `*.pyc`,
+# `.pytest_cache/` etc. into a `.pfignore` or pass `--ignore <pat>`).
+globset    = "0.4"
 reqwest    = { workspace = true, optional = true }
 tokio-tungstenite = { workspace = true, optional = true }
 futures-util = { workspace = true, optional = true }
