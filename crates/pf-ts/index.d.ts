@@ -10,8 +10,64 @@ export interface Message {
   role: string
   content: string
 }
-/** `snapshotFilesystem(store, agentKind, fsRoot, env, messages): string` */
-export declare function snapshotFilesystem(store: PfStore, agentKind: string, fsRoot: string, env: Record<string, string>, messages: Array<Message>): string
+/**
+ * One ACRFence-shaped tool-call ledger entry. Mirrors the Python
+ * SDK's `_EffectEntry` TypedDict — adapters maintain a list of these
+ * as the agent runs, then pass the list via `opts.effects` so a
+ * restored agent sees prior side effects as facts (ACRFence).
+ */
+export interface EffectEntry {
+  toolId: string
+  argsHash?: string
+  resultHash?: string
+  idempotencyKey?: string
+  /**
+   * `"pure" | "idempotent" | "irreversible" | "network-only"`.
+   * Defaults to `"irreversible"` if absent.
+   */
+  sideEffectClass?: string
+  /** RFC-3339 timestamp; defaults to `Utc::now()` when absent. */
+  timestamp?: string
+}
+/**
+ * Knobs for [`snapshot_filesystem`]. Optional — `None` keeps the safe
+ * defaults: `defaultScrubEnv = true`, `effects = []`, `scrubEnv = []`.
+ */
+export interface SnapshotOpts {
+  /**
+   * Tool-call ledger entries; folded into the HMAC-chained
+   * `effects.ledger.v1` blob.
+   */
+  effects?: Array<EffectEntry>
+  /**
+   * Default `true`. When `true` the built-in secret-shaped-name
+   * regex (matches `OPENAI_API_KEY`, `*_TOKEN`, `*_SECRET`,
+   * `*_PASSWORD`, `*_KEY`, `auth*`, `bearer*`, etc.) is applied to
+   * `env`. Set `false` only when you genuinely need the raw env in
+   * the snapshot.
+   */
+  defaultScrubEnv?: boolean
+  /**
+   * Additional regex patterns; any env-var name matching either
+   * the default or a custom pattern becomes `"<redacted>"`.
+   */
+  scrubEnv?: Array<string>
+}
+/**
+ * `snapshotFilesystem(store, agentKind, fsRoot, env, messages, opts?): string`
+ *
+ * Captures FS sandbox + env (with default redaction of secret-shaped
+ * names) + chat trace + an HMAC-chained effects ledger into a `.pfimg`
+ * manifest. Returns the manifest CID.
+ *
+ * Set `opts.defaultScrubEnv = false` to disable env redaction, or
+ * `opts.scrubEnv = [...]` to add custom regex patterns. Pass
+ * `opts.effects` to fold tool-call ledger entries into the ACRFence
+ * chain. Operators with `PF_SESSION_SECRET=<hex>` in env get real
+ * out-of-band ACRFence; otherwise a fresh per-snapshot secret is
+ * generated and embedded for tamper-detection mode.
+ */
+export declare function snapshotFilesystem(store: PfStore, agentKind: string, fsRoot: string, env: Record<string, string>, messages: Array<Message>, opts?: SnapshotOpts | undefined | null): string
 /**
  * `checkoutFilesystem(store, cid, targetPath): void`. `targetPath` MUST NOT
  * already exist.
@@ -23,6 +79,14 @@ export declare function checkoutFilesystem(store: PfStore, cid: string, targetPa
  * want a typed object.
  */
 export declare function readManifest(store: PfStore, cid: string): string
+/**
+ * `readBlob(store, digest): Buffer` — fetch raw bytes of a content-
+ * addressed blob. Mirrors the Python SDK's `processfork.read_blob`.
+ * Adapters that need to inspect individual layer blobs
+ * (`world.env`, `effects.ledger`, etc.) call this; otherwise prefer
+ * `readManifest` for the high-level view.
+ */
+export declare function readBlob(store: PfStore, digest: string): Array<number>
 export interface WorldConflict {
   path: string
   aDigest: string

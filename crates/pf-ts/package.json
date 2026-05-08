@@ -1,6 +1,6 @@
 {
   "name": "@processfork/sdk",
-  "version": "1.0.9",
+  "version": "1.0.10",
   "description": "ProcessFork — fork() for AI agents (TypeScript SDK).",
   "license": "MIT",
   "homepage": "https://github.com/manav8498/processfork",

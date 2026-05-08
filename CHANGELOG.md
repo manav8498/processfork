@@ -4,6 +4,88 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.0.10] — 2026-05-07
+
+Closes the two TypeScript-SDK gaps the v1.0.9 retest flagged. v1.0.7
+hardened the CLI's snapshot path; v1.0.9 propagated the fix to the
+Python SDK; v1.0.10 propagates it to the TypeScript SDK. The CLI,
+Python SDK, and TypeScript SDK now all go through the same scrub
+regex and the same HMAC-chained `pf_effects::Ledger` code path —
+parity across all three surfaces.
+
+### Security: TS SDK env capture is no longer unsafe-by-default
+
+- `snapshotFilesystem(store, kind, root, env, messages, opts?)` now
+  applies the same default scrub regex the CLI and Python SDK use
+  (`(?i)(?:^|_)(token|secret|password|passwd|pwd|api_?key|apikey|
+  auth|bearer)(?:_|$)`) — env keys matching it are stored as
+  `"<redacted>"`. JS callers that did
+  `snapshotFilesystem(..., { OPENAI_API_KEY: "...", PWD: root })`
+  were storing the raw API key bytes in `world.env` — the auditor
+  reproduced the leak with two separate stores.
+- New `opts.defaultScrubEnv: boolean = true` knob; pass `false` to
+  opt out (rare; CI debugging at most).
+- New `opts.scrubEnv: string[]` for additional regex patterns,
+  mirroring the CLI's `--scrub-env` flag.
+- Smoke-test fix: the prior `test/smoke.mjs` passed `new Map([...])`
+  for the env arg; napi-rs serializes JS `Map` instances to `{}`
+  (only plain objects deserialize to Rust `BTreeMap`), so the test
+  silently received empty env and never exercised the leak path.
+  Switched to plain objects (the typed signature's documented
+  shape) and added 3 regression tests:
+  - `default env scrub redacts secret-shaped names` — proves
+    `OPENAI_API_KEY`/`GITHUB_TOKEN`/`DATABASE_PASSWORD`/`MY_API_KEY`
+    redacted, AND that the secret bytes don't appear anywhere in
+    the serialized env blob.
+  - `defaultScrubEnv = false opts out` — proves the opt-out path.
+  - `effects ledger is HMAC-chained` — see below.
+
+### ACRFence: TS SDK ledger is HMAC-chained for real
+
+- Prior versions of the TS SDK ALWAYS wrote
+  `{"kind":"effects.ledger.v1","entries":0}\n` to `effects.ledger`
+  regardless of caller intent — TS integrations had no ACRFence
+  protection at all, even when they had a real tool-call list.
+- New `opts.effects: EffectEntry[]` parameter; entries are routed
+  through `pf_effects::ledger::Ledger::append` (per-entry
+  `session_hmac = HMAC(secret, prev_hash || this_hash)`) and the
+  blob comes out byte-compatible with the CLI/Python output —
+  same header marker, same `session_secret_hex` embedding, same
+  `verification_mode = "tamper-detection"`.
+- `pf verify` validates SDK-produced ledgers through the same code
+  path it already used for CLI ledgers (no `pf verify` change
+  needed).
+- `EffectEntry` shape (camelCase TS): `toolId`, `argsHash`,
+  `resultHash`, `idempotencyKey`, `sideEffectClass` ("pure" |
+  "idempotent" | "irreversible" | "network-only"), `timestamp`
+  (RFC-3339; defaults to now). All fields except `toolId` optional.
+
+### New SDK surface: `readBlob`
+
+- `readBlob(store, digest): Buffer` — fetches raw blob bytes by
+  digest. Mirrors the Python SDK's `processfork.read_blob`.
+  Adapters that need to inspect individual layer blobs (e.g. the
+  smoke tests verifying the redaction wrote correctly to `world.env`,
+  or a future TS LangGraph checkpointer reading the trace blob)
+  call this.
+
+### Versions
+
+- `processfork` (Rust + Python wheel): 1.0.9 → **1.0.10**
+- All 8 internal `pf-*` crate version pins: → 1.0.10
+- npm `@processfork/sdk`: 1.0.9 → **1.0.10**
+
+### Why this matters
+
+The v1.0.9 retest passed 13 of 13 real-world cases on the CLI +
+Python paths but explicitly flagged the TS SDK as a *blocker*: a JS
+caller using the typed signature exactly as documented was leaking
+raw API keys to disk, and the TS effects ledger gave no ACRFence
+protection regardless of caller intent. Both gaps are CLI/Python
+fixes that hadn't been propagated to TS. They are now propagated,
+with regression tests proving the exact attack patterns the auditor
+reported.
+
 ## [1.0.9] — 2026-05-06
 
 Closes the two SDK-side gaps the v1.0.8 retest flagged. v1.0.7

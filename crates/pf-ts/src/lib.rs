@@ -100,7 +100,67 @@ pub struct Message {
     pub content: String,
 }
 
-/// `snapshotFilesystem(store, agentKind, fsRoot, env, messages): string`
+/// One ACRFence-shaped tool-call ledger entry. Mirrors the Python
+/// SDK's `_EffectEntry` TypedDict — adapters maintain a list of these
+/// as the agent runs, then pass the list via `opts.effects` so a
+/// restored agent sees prior side effects as facts (ACRFence).
+#[napi(object)]
+#[derive(Default)]
+pub struct EffectEntry {
+    pub tool_id: String,
+    pub args_hash: Option<String>,
+    pub result_hash: Option<String>,
+    pub idempotency_key: Option<String>,
+    /// `"pure" | "idempotent" | "irreversible" | "network-only"`.
+    /// Defaults to `"irreversible"` if absent.
+    pub side_effect_class: Option<String>,
+    /// RFC-3339 timestamp; defaults to `Utc::now()` when absent.
+    pub timestamp: Option<String>,
+}
+
+/// Knobs for [`snapshot_filesystem`]. Optional — `None` keeps the safe
+/// defaults: `defaultScrubEnv = true`, `effects = []`, `scrubEnv = []`.
+#[napi(object)]
+#[derive(Default)]
+pub struct SnapshotOpts {
+    /// Tool-call ledger entries; folded into the HMAC-chained
+    /// `effects.ledger.v1` blob.
+    pub effects: Option<Vec<EffectEntry>>,
+    /// Default `true`. When `true` the built-in secret-shaped-name
+    /// regex (matches `OPENAI_API_KEY`, `*_TOKEN`, `*_SECRET`,
+    /// `*_PASSWORD`, `*_KEY`, `auth*`, `bearer*`, etc.) is applied to
+    /// `env`. Set `false` only when you genuinely need the raw env in
+    /// the snapshot.
+    pub default_scrub_env: Option<bool>,
+    /// Additional regex patterns; any env-var name matching either
+    /// the default or a custom pattern becomes `"<redacted>"`.
+    pub scrub_env: Option<Vec<String>>,
+}
+
+/// Built-in env-var scrub regex. Mirrors the CLI's `DEFAULT_SCRUB_REGEX`
+/// in `crates/pf-cli/src/commands/snapshot.rs` and the SDK constant in
+/// `crates/pf-py/src/lib.rs::DEFAULT_ENV_SCRUB`.
+///
+/// v1.0.10 audit fix: prior versions of the TS SDK stored the supplied
+/// env object verbatim. JS callers that did
+/// `snapshotFilesystem(..., { OPENAI_API_KEY: "..." })` leaked the raw
+/// value into the blob, even though the CLI (v1.0.7) and Python SDK
+/// (v1.0.9) both already redacted by default.
+const DEFAULT_ENV_SCRUB: &str =
+    r"(?i)(?:^|_)(token|secret|password|passwd|pwd|api_?key|apikey|auth|bearer)(?:_|$)";
+
+/// `snapshotFilesystem(store, agentKind, fsRoot, env, messages, opts?): string`
+///
+/// Captures FS sandbox + env (with default redaction of secret-shaped
+/// names) + chat trace + an HMAC-chained effects ledger into a `.pfimg`
+/// manifest. Returns the manifest CID.
+///
+/// Set `opts.defaultScrubEnv = false` to disable env redaction, or
+/// `opts.scrubEnv = [...]` to add custom regex patterns. Pass
+/// `opts.effects` to fold tool-call ledger entries into the ACRFence
+/// chain. Operators with `PF_SESSION_SECRET=<hex>` in env get real
+/// out-of-band ACRFence; otherwise a fresh per-snapshot secret is
+/// generated and embedded for tamper-detection mode.
 #[napi]
 #[allow(clippy::needless_pass_by_value)]
 pub fn snapshot_filesystem(
@@ -109,12 +169,39 @@ pub fn snapshot_filesystem(
     fs_root: String,
     env: BTreeMap<String, String>,
     messages: Vec<Message>,
+    opts: Option<SnapshotOpts>,
 ) -> napi::Result<String> {
     let blobs: Arc<dyn BlobStore> = store.inner.blobs_arc();
+    let opts = opts.unwrap_or_default();
 
     let fs_root_path = expand_user(&fs_root);
     let walker = pf_world::WalkFsCapture::new(&fs_root_path);
     let fs_digest = walker.capture(&blobs).map_err(map_err)?;
+
+    // Env: apply default + caller-supplied scrub regexes BEFORE
+    // serializing so secret-shaped names never reach the blob
+    // unredacted. Mirrors the Python SDK fix in v1.0.9.
+    let mut scrubs: Vec<regex::Regex> = Vec::new();
+    if opts.default_scrub_env.unwrap_or(true) {
+        scrubs.push(
+            regex::Regex::new(DEFAULT_ENV_SCRUB)
+                .expect("compiled-in default env scrub regex must parse"),
+        );
+    }
+    if let Some(extras) = &opts.scrub_env {
+        for pat in extras {
+            scrubs.push(regex::Regex::new(pat).map_err(|e| {
+                NapiError::new(Status::InvalidArg, format!("scrubEnv regex {pat:?}: {e}"))
+            })?);
+        }
+    }
+    let scrubbed_env: BTreeMap<String, String> = env
+        .into_iter()
+        .map(|(k, v)| {
+            let redacted = scrubs.iter().any(|re| re.is_match(&k));
+            (k, if redacted { "<redacted>".into() } else { v })
+        })
+        .collect();
 
     #[derive(Serialize)]
     struct EnvBlob<'a> {
@@ -125,7 +212,7 @@ pub fn snapshot_filesystem(
     let env_blob = EnvBlob {
         kind: "env.v1",
         cwd: fs_root_path.to_string_lossy().to_string(),
-        vars: &env,
+        vars: &scrubbed_env,
     };
     let env_digest =
         blobs
@@ -170,8 +257,119 @@ pub fn snapshot_filesystem(
     }
     let trace_digest = blobs.put(&trace_bytes).map_err(map_err)?;
 
-    let ledger_bytes = b"{\"kind\":\"effects.ledger.v1\",\"entries\":0}\n".to_vec();
-    let ledger_digest = blobs.put(&ledger_bytes).map_err(map_err)?;
+    // Effects ledger.
+    //
+    // v1.0.10 audit fix: prior versions of the TS SDK always wrote an
+    // empty raw blob (`{"kind":"effects.ledger.v1","entries":0}\n`),
+    // so TS integrations had no ACRFence "won't double-send" guard,
+    // even when callers supplied tool-call entries. Now route every
+    // entry through `pf_effects::ledger::Ledger::append`, computing
+    // per-entry `session_hmac = HMAC(secret, prev_hash || this_hash)`
+    // — same code path as the Python SDK (v1.0.9) and CLI (v1.0.7).
+    //
+    // Session secret comes from `PF_SESSION_SECRET` env var if
+    // present (operator-supplied — preferred for real ACRFence), or
+    // is freshly generated per snapshot. When generated here we
+    // embed the hex into the blob header so `pf verify` can perform
+    // tamper detection without an out-of-band secret.
+    let ledger_digest = {
+        use pf_effects::ledger::{Ledger, SessionSecret, SideEffectClass};
+
+        let (secret_bytes, embed_in_blob) = if let Ok(hex_str) = std::env::var("PF_SESSION_SECRET")
+        {
+            (
+                hex::decode(hex_str.trim()).map_err(|e| {
+                    NapiError::new(Status::InvalidArg, format!("PF_SESSION_SECRET hex: {e}"))
+                })?,
+                false,
+            )
+        } else {
+            use ring::rand::SecureRandom;
+            let mut buf = [0u8; 32];
+            ring::rand::SystemRandom::new()
+                .fill(&mut buf)
+                .map_err(|_| NapiError::new(Status::GenericFailure, "session-secret RNG failed"))?;
+            (buf.to_vec(), true)
+        };
+        let secret_hex = hex::encode(&secret_bytes);
+        let secret = SessionSecret::new(secret_bytes);
+
+        let mut ledger = Ledger::new(secret);
+        if let Some(entries) = opts.effects {
+            for e in entries {
+                let class_str = e.side_effect_class.unwrap_or_else(|| "irreversible".into());
+                let side_effect_class = match class_str.as_str() {
+                    "pure" => SideEffectClass::Pure,
+                    "idempotent" => SideEffectClass::Idempotent,
+                    "network-only" => SideEffectClass::NetworkOnly,
+                    _ => SideEffectClass::Irreversible,
+                };
+                let args_hash = e
+                    .args_hash
+                    .as_deref()
+                    .and_then(|s| Digest256::parse(s).ok())
+                    .unwrap_or_else(|| Digest256::of(&[]));
+                let result_hash = e
+                    .result_hash
+                    .as_deref()
+                    .and_then(|s| Digest256::parse(s).ok())
+                    .unwrap_or_else(|| Digest256::of(&[]));
+                let timestamp = e
+                    .timestamp
+                    .as_deref()
+                    .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
+                    .map_or_else(chrono::Utc::now, |dt| dt.with_timezone(&chrono::Utc));
+                ledger
+                    .append(
+                        timestamp,
+                        &e.tool_id,
+                        args_hash,
+                        e.idempotency_key.unwrap_or_default(),
+                        result_hash,
+                        side_effect_class,
+                    )
+                    .map_err(|e| {
+                        NapiError::new(Status::GenericFailure, format!("ledger append: {e}"))
+                    })?;
+            }
+        }
+
+        let raw_digest = ledger.serialize(blobs.as_ref()).map_err(map_err)?;
+        if embed_in_blob {
+            // Replace the header line with an extended one that
+            // carries `session_secret_hex` so `pf verify` can run
+            // without an out-of-band secret. Body stays untouched.
+            let raw_bytes = blobs.get(&raw_digest).map_err(map_err)?;
+            let mut split = raw_bytes.splitn(2, |b| *b == b'\n');
+            let header_bytes = split.next().unwrap_or(&[]);
+            let body_bytes = split.next().unwrap_or(&[]);
+            let mut header: serde_json::Value =
+                serde_json::from_slice(header_bytes).map_err(|e| {
+                    NapiError::new(Status::GenericFailure, format!("ledger header: {e}"))
+                })?;
+            if let Some(obj) = header.as_object_mut() {
+                obj.insert(
+                    "session_secret_hex".to_owned(),
+                    serde_json::Value::String(secret_hex),
+                );
+                obj.insert(
+                    "verification_mode".to_owned(),
+                    serde_json::Value::String("tamper-detection".into()),
+                );
+            }
+            let mut new_blob = serde_json::to_vec(&header).map_err(|e| {
+                NapiError::new(
+                    Status::GenericFailure,
+                    format!("ledger header re-encode: {e}"),
+                )
+            })?;
+            new_blob.push(b'\n');
+            new_blob.extend_from_slice(body_bytes);
+            blobs.put(&new_blob).map_err(map_err)?
+        } else {
+            raw_digest
+        }
+    };
 
     let model_envelope = serde_json::json!({
         "layout": "model.diff.v1",
@@ -261,6 +459,19 @@ pub fn read_manifest(store: &PfStore, cid: String) -> napi::Result<String> {
     let m = store.inner.get_manifest(&cid).map_err(map_err)?;
     serde_json::to_string(&m)
         .map_err(|e| NapiError::new(Status::GenericFailure, format!("serialize: {e}")))
+}
+
+// ----------------------- readBlob -----------------------
+
+/// `readBlob(store, digest): Buffer` — fetch raw bytes of a content-
+/// addressed blob. Mirrors the Python SDK's `processfork.read_blob`.
+/// Adapters that need to inspect individual layer blobs
+/// (`world.env`, `effects.ledger`, etc.) call this; otherwise prefer
+/// `readManifest` for the high-level view.
+#[napi]
+pub fn read_blob(store: &PfStore, digest: String) -> napi::Result<Vec<u8>> {
+    let d = parse_cid(&digest)?;
+    store.inner.blobs().get(&d).map_err(map_err)
 }
 
 // ----------------------- merge -----------------------

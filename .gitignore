@@ -57,3 +57,4 @@ crates/pf-ts/*.node
 crates/pf-ts/node_modules/
 .claude/scheduled_tasks.lock
 .venv-pftest/
+crates/pf-ts/package-lock.json

@@ -310,11 +310,12 @@ if (!nativeBinding) {
   throw new Error(`Failed to load native binding`)
 }
 
-const { digestOf, PfStore, snapshotFilesystem, checkoutFilesystem, readManifest, merge } = nativeBinding
+const { digestOf, PfStore, snapshotFilesystem, checkoutFilesystem, readManifest, readBlob, merge } = nativeBinding
 
 module.exports.digestOf = digestOf
 module.exports.PfStore = PfStore
 module.exports.snapshotFilesystem = snapshotFilesystem
 module.exports.checkoutFilesystem = checkoutFilesystem
 module.exports.readManifest = readManifest
+module.exports.readBlob = readBlob
 module.exports.merge = merge

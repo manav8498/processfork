@@ -25,6 +25,12 @@ napi-derive = { workspace = true }
 serde       = { workspace = true }
 serde_json  = { workspace = true }
 chrono      = { workspace = true }
+# v1.0.10 audit fix (TS env scrub + HMAC-chained ledger):
+# regex = default-scrub regex, hex/ring = session-secret material
+# matching the CLI/Python tamper-detection-mode header.
+regex       = "1.10"
+hex         = { workspace = true }
+ring        = { workspace = true }
 
 [build-dependencies]
 napi-build = "2.1"
