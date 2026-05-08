@@ -4,13 +4,13 @@ build-backend = "hatchling.build"
 
 [project]
 name = "processfork-criu"
-version = "1.0.13"
+version = "1.0.14"
 description = "ProcessFork CRIU adapter — Linux in-flight subprocess capture (procs.criu.v1)."
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.9"
 authors = [{ name = "manav8498", email = "manavpatel91570@gmail.com" }]
-dependencies = ["processfork>=1.0.13"]
+dependencies = ["processfork>=1.0.14"]
 
 # CRIU's Python bindings ("python3-criu") are distro-only (Debian/Ubuntu/
 # Fedora packages). Users typically install the `criu` CLI binary

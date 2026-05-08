@@ -25,7 +25,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-__version__ = "1.0.13"
+__version__ = "1.0.14"
 
 # v1.0.12 wire format. The on-disk procs blob looks like:
 #

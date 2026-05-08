@@ -41,5 +41,8 @@ pub mod procs;
 
 pub use browser::{BrowserBlob, BrowserCapture, PageSnapshot};
 pub use env::EnvCapture;
-pub use fs::{FsEntryKind, FsTree, FsTreeEntry, WalkFsCapture, restore_tree};
+pub use fs::{
+    FsEntryKind, FsTree, FsTreeEntry, RestoreOptions, WalkFsCapture, restore_tree,
+    restore_tree_with_options,
+};
 pub use procs::ProcsCapture;

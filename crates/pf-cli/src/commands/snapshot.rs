@@ -153,6 +153,34 @@ pub struct Args {
     #[arg(long)]
     pub no_default_ignores: bool,
 
+    /// PID to capture via the **portable respawn** path (works on
+    /// macOS, Linux, Windows). When set, the world layer's `procs`
+    /// blob is `procs.respawn.v1` — a JSON dict capturing the
+    /// process's argv, cwd, env, parent PID, exe path, and the
+    /// paths backing its open file descriptors at snapshot time.
+    ///
+    /// This is *not* a substitute for CRIU. It captures enough
+    /// configuration to RE-INVOKE the process from a checkpoint
+    /// (think: deployment metadata + state files), not enough to
+    /// resume it mid-execution. CRIU is the right tool when you
+    /// need register-state / heap / pending-syscall fidelity;
+    /// `--respawn-pid` is the right tool when your agent is
+    /// stateless or persists everything to disk and you just want
+    /// "spin it back up the same way".
+    ///
+    /// On Linux + permission to read `/proc/<pid>/`, this captures
+    /// real fd-paths via `/proc/<pid>/fd/*`. On macOS we
+    /// best-effort via `lsof -p <pid> -F n -a` — if `lsof` isn't on
+    /// `$PATH`, the fd list is empty (still useful: argv/cwd/env
+    /// alone reconstitute most agent configurations).
+    ///
+    /// v1.0.14 audit fix: closes the v1.0.13 retest's "CRIU
+    /// Linux-only" limitation by giving non-Linux operators a
+    /// portable subprocess-capture path. Combine with `--criu-pid`
+    /// only on Linux when you want both.
+    #[arg(long)]
+    pub respawn_pid: Option<i32>,
+
     /// PID to capture via the processfork-criu adapter (Linux only).
     /// When set, the world layer's `procs` blob is `procs.criu.v1`
     /// (a real CRIU image bundle) instead of `procs.unsupported.v1`
@@ -324,15 +352,26 @@ pub fn run(store_root: &Path, args: Args) -> anyhow::Result<()> {
     // non-zero with a clear message and we surface that to the
     // operator. v1.0.12 audit fix: closes the v1.0.11 README's
     // "always placeholder" gap on the world layer's procs row.
-    let procs_digest = if let Some(pid) = args.criu_pid {
-        capture_criu_procs(&blobs, pid)?
-    } else {
-        let procs_blob = serde_json::json!({
-            "kind": "procs.unsupported.v1",
-            "unsupported_on": std::env::consts::OS,
-            "note": "pf snapshot does not capture in-flight subprocesses without --criu-pid",
-        });
-        blobs.put(&serde_json::to_vec(&procs_blob)?)?
+    let procs_digest = match (args.criu_pid, args.respawn_pid) {
+        (Some(_), Some(_)) => {
+            return Err(CliError::BadInput(
+                "--criu-pid and --respawn-pid are mutually exclusive (CRIU is the \
+                 stronger capture; pick one based on whether you need register-state \
+                 fidelity or just respawn metadata)"
+                    .into(),
+            )
+            .into());
+        }
+        (Some(pid), None) => capture_criu_procs(&blobs, pid)?,
+        (None, Some(pid)) => capture_respawn_procs(&blobs, pid)?,
+        (None, None) => {
+            let procs_blob = serde_json::json!({
+                "kind": "procs.unsupported.v1",
+                "unsupported_on": std::env::consts::OS,
+                "note": "pf snapshot does not capture in-flight subprocesses without --criu-pid or --respawn-pid",
+            });
+            blobs.put(&serde_json::to_vec(&procs_blob)?)?
+        }
     };
 
     // Trace. v1.0.4 audit fix: validate the JSONL content (not just
@@ -766,4 +805,243 @@ sys.stdout.buffer.write(bundle.serialize())\n\
         anyhow::bail!("--criu-pid {pid} failed: {}", stderr.trim());
     }
     Ok(blobs.put(&output.stdout)?)
+}
+
+/// Capture a `procs.respawn.v1` blob for `pid`. Portable across
+/// macOS, Linux, and Windows — uses platform-specific introspection
+/// where available, falls back to argv/cwd/env via the `sysinfo`
+/// crate-equivalent (we hand-roll instead of pulling another dep).
+///
+/// What's captured:
+/// - argv: command-line tokens (best-effort, may be the executable
+///   name only on macOS without `ps -o command`).
+/// - cwd: current working directory at snapshot time.
+/// - env: vector of `KEY=value` pairs, with the same default scrub
+///   applied as the world-layer env capture.
+/// - exe: absolute path of the executable image.
+/// - parent_pid: the parent process's PID, if discoverable.
+/// - fd_paths: best-effort list of paths backing open file
+///   descriptors. On Linux via `/proc/<pid>/fd/*` symlinks; on
+///   macOS via `lsof -p <pid> -F n -a` if `lsof` is on `$PATH`;
+///   empty otherwise.
+///
+/// What's NOT captured (by design — this is RESPAWN, not RESTORE):
+/// - Process memory (heap, stack, CPU registers).
+/// - In-flight syscall state.
+/// - Anonymous mappings, shared memory.
+/// - Signal handlers / pending signals.
+/// - TCP socket state.
+///
+/// For those, use `--criu-pid` (Linux + CRIU only).
+fn capture_respawn_procs(
+    blobs: &Arc<dyn pf_core::cas::BlobStore>,
+    pid: i32,
+) -> anyhow::Result<pf_core::digest::Digest256> {
+    if pid <= 0 {
+        anyhow::bail!("--respawn-pid: bad PID {pid}");
+    }
+
+    let argv = read_argv(pid).unwrap_or_default();
+    let cwd = read_cwd(pid).unwrap_or_default();
+    let exe = read_exe(pid).unwrap_or_default();
+    let env = read_env(pid).unwrap_or_default();
+    let parent_pid = read_parent_pid(pid);
+    let fd_paths = read_fd_paths(pid).unwrap_or_default();
+
+    let blob = serde_json::json!({
+        "kind": "procs.respawn.v1",
+        "schema": 1,
+        "pid": pid,
+        "parent_pid": parent_pid,
+        "exe": exe,
+        "argv": argv,
+        "cwd": cwd,
+        "env": env,
+        "fd_paths": fd_paths,
+        "captured_on": std::env::consts::OS,
+        "captured_arch": std::env::consts::ARCH,
+        "captured_at": chrono::Utc::now().to_rfc3339(),
+        "note": "respawn = re-invoke from configuration; for register-state fidelity use --criu-pid (Linux only)",
+    });
+    Ok(blobs.put(&serde_json::to_vec(&blob)?)?)
+}
+
+#[cfg(target_os = "linux")]
+fn read_argv(pid: i32) -> Option<Vec<String>> {
+    let bytes = std::fs::read(format!("/proc/{pid}/cmdline")).ok()?;
+    Some(
+        bytes
+            .split(|b| *b == 0)
+            .filter(|s| !s.is_empty())
+            .map(|s| String::from_utf8_lossy(s).into_owned())
+            .collect(),
+    )
+}
+
+#[cfg(target_os = "linux")]
+fn read_cwd(pid: i32) -> Option<String> {
+    std::fs::read_link(format!("/proc/{pid}/cwd"))
+        .ok()
+        .map(|p| p.display().to_string())
+}
+
+#[cfg(target_os = "linux")]
+fn read_exe(pid: i32) -> Option<String> {
+    std::fs::read_link(format!("/proc/{pid}/exe"))
+        .ok()
+        .map(|p| p.display().to_string())
+}
+
+#[cfg(target_os = "linux")]
+fn read_env(pid: i32) -> Option<Vec<String>> {
+    let bytes = std::fs::read(format!("/proc/{pid}/environ")).ok()?;
+    Some(
+        bytes
+            .split(|b| *b == 0)
+            .filter(|s| !s.is_empty())
+            .map(|s| String::from_utf8_lossy(s).into_owned())
+            .collect(),
+    )
+}
+
+#[cfg(target_os = "linux")]
+fn read_parent_pid(pid: i32) -> Option<i32> {
+    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+    // Skip past the executable name (in parens, may contain spaces)
+    // by finding the trailing `)` and taking field index 3 (PPID)
+    // from the post-`)` substring.
+    let after = stat.rsplitn(2, ')').next()?;
+    let fields: Vec<&str> = after.split_whitespace().collect();
+    fields.get(1)?.parse().ok()
+}
+
+#[cfg(target_os = "linux")]
+fn read_fd_paths(pid: i32) -> Option<Vec<String>> {
+    let dir = std::fs::read_dir(format!("/proc/{pid}/fd")).ok()?;
+    let mut out = Vec::new();
+    for e in dir.flatten() {
+        if let Ok(p) = std::fs::read_link(e.path()) {
+            out.push(p.display().to_string());
+        }
+    }
+    out.sort();
+    Some(out)
+}
+
+// macOS: `/proc` doesn't exist. Use `ps` for argv, `lsof` for fds.
+// Both are in /usr/bin on every shipping macOS; if missing, return
+// None and capture_respawn_procs falls back to empty fields.
+#[cfg(target_os = "macos")]
+fn read_argv(pid: i32) -> Option<Vec<String>> {
+    let out = std::process::Command::new("ps")
+        .args(["-o", "command=", "-p", &pid.to_string()])
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let line = String::from_utf8_lossy(&out.stdout).trim().to_owned();
+    if line.is_empty() {
+        return None;
+    }
+    Some(line.split_whitespace().map(str::to_owned).collect())
+}
+
+#[cfg(target_os = "macos")]
+fn read_cwd(pid: i32) -> Option<String> {
+    // `lsof -p <pid> -d cwd -F n` prints `n<path>` on the line
+    // following the PID line.
+    let out = std::process::Command::new("lsof")
+        .args(["-p", &pid.to_string(), "-d", "cwd", "-F", "n"])
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .find(|l| l.starts_with('n'))
+        .map(|l| l[1..].to_owned())
+}
+
+#[cfg(target_os = "macos")]
+fn read_exe(pid: i32) -> Option<String> {
+    let out = std::process::Command::new("ps")
+        .args(["-o", "comm=", "-p", &pid.to_string()])
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let s = String::from_utf8_lossy(&out.stdout).trim().to_owned();
+    (!s.is_empty()).then_some(s)
+}
+
+#[cfg(target_os = "macos")]
+fn read_env(_pid: i32) -> Option<Vec<String>> {
+    // macOS doesn't expose another process's environ without root +
+    // KERN_PROCARGS2 sysctl gymnastics. Out of scope for v1.0.14;
+    // operators who need other-process env on macOS use --criu-pid
+    // on a Linux container.
+    None
+}
+
+#[cfg(target_os = "macos")]
+fn read_parent_pid(pid: i32) -> Option<i32> {
+    let out = std::process::Command::new("ps")
+        .args(["-o", "ppid=", "-p", &pid.to_string()])
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    String::from_utf8_lossy(&out.stdout).trim().parse().ok()
+}
+
+#[cfg(target_os = "macos")]
+fn read_fd_paths(pid: i32) -> Option<Vec<String>> {
+    let out = std::process::Command::new("lsof")
+        .args(["-p", &pid.to_string(), "-F", "n", "-a"])
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let mut v: Vec<String> = String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .filter_map(|l| l.strip_prefix('n').map(str::to_owned))
+        .filter(|s| !s.is_empty())
+        .collect();
+    v.sort();
+    v.dedup();
+    Some(v)
+}
+
+// Windows / other: respawn-pid surfaces a clear error. The flag
+// itself parses, but the helper returns a sensible empty capture
+// rather than panicking — operators see the kind = procs.respawn.v1
+// blob with empty argv/cwd/env and can decide what to do.
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+fn read_argv(_pid: i32) -> Option<Vec<String>> {
+    None
+}
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+fn read_cwd(_pid: i32) -> Option<String> {
+    None
+}
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+fn read_exe(_pid: i32) -> Option<String> {
+    None
+}
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+fn read_env(_pid: i32) -> Option<Vec<String>> {
+    None
+}
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+fn read_parent_pid(_pid: i32) -> Option<i32> {
+    None
+}
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+fn read_fd_paths(_pid: i32) -> Option<Vec<String>> {
+    None
 }

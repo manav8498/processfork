@@ -775,6 +775,136 @@ fn snapshot_scrub_env_redacts_matching_keys() {
     );
 }
 
+/// v1.0.14: `pf snapshot --respawn-pid <PID>` is a portable
+/// subprocess-capture path that works on macOS and Linux without
+/// requiring CRIU. Captures argv / cwd / env / fd paths, NOT live
+/// memory state. Validates that the procs blob shape is
+/// `procs.respawn.v1` (vs `procs.unsupported.v1` without the flag,
+/// or `procs.criu.v1` with `--criu-pid` on Linux).
+#[test]
+fn snapshot_respawn_pid_emits_respawn_v1_blob() {
+    use pf_core::digest::Digest256;
+    let store = TempDir::new().unwrap();
+    let sandbox = TempDir::new().unwrap();
+    make_sandbox(sandbox.path());
+    // Capture the test process itself — every host has a self-PID.
+    let self_pid = std::process::id();
+    let cid_str = String::from_utf8(
+        pf(store.path())
+            .args(["snapshot", "--agent-id", "t", "--fs-root"])
+            .arg(sandbox.path())
+            .args(["--respawn-pid", &self_pid.to_string()])
+            .assert()
+            .success()
+            .get_output()
+            .stdout
+            .clone(),
+    )
+    .unwrap()
+    .trim()
+    .to_owned();
+    let store_handle = pf_core::store::PfStore::open(store.path()).unwrap();
+    let cid = Digest256::parse(&cid_str).unwrap();
+    let manifest = store_handle.get_manifest(&cid).unwrap();
+    let blob = store_handle.blobs_arc().get(&manifest.world.procs).unwrap();
+    let blob_json: serde_json::Value = serde_json::from_slice(&blob).unwrap();
+    assert_eq!(blob_json["kind"], "procs.respawn.v1");
+    assert_eq!(blob_json["pid"].as_i64(), Some(i64::from(self_pid)));
+    // captured_on must match the host OS so cross-platform restore
+    // can decide whether the bundle is meaningful.
+    let captured_on = blob_json["captured_on"].as_str().unwrap();
+    assert!(
+        captured_on == std::env::consts::OS,
+        "captured_on must match host OS: {captured_on}"
+    );
+    // argv must contain at least the executable name (the test
+    // binary). Empty argv would mean ps/proc introspection broke.
+    let argv = blob_json["argv"].as_array().unwrap();
+    assert!(
+        !argv.is_empty(),
+        "respawn capture must record at least argv[0]; got: {blob_json:#}"
+    );
+}
+
+/// v1.0.14: --criu-pid and --respawn-pid are mutually exclusive.
+/// Pick the right tool for the job: CRIU for register-state
+/// fidelity (Linux only), respawn for portable configuration
+/// metadata.
+#[test]
+fn snapshot_criu_and_respawn_are_mutually_exclusive() {
+    let store = TempDir::new().unwrap();
+    let sandbox = TempDir::new().unwrap();
+    make_sandbox(sandbox.path());
+    pf(store.path())
+        .args(["snapshot", "--agent-id", "t", "--fs-root"])
+        .arg(sandbox.path())
+        .args(["--criu-pid", "1", "--respawn-pid", "1"])
+        .assert()
+        .failure()
+        .stderr(contains("mutually exclusive"));
+}
+
+/// v1.0.14: `pf checkout --allow-absolute-symlinks` opts in to
+/// restoring symlinks with absolute targets. Without the flag,
+/// such symlinks are skipped with a stderr warning and the rest
+/// of the tree restores normally — that's the default-deny
+/// posture, plus a strict improvement over v1.0.13's hard error.
+#[cfg(unix)]
+#[test]
+fn checkout_absolute_symlink_skip_default_then_allow_opt_in() {
+    let store = TempDir::new().unwrap();
+    let sandbox = TempDir::new().unwrap();
+    std::fs::create_dir_all(sandbox.path().join("src")).unwrap();
+    std::fs::write(sandbox.path().join("src/main.py"), "print('hi')\n").unwrap();
+    // Create an absolute-target symlink in the captured tree. The
+    // target needn't exist on disk.
+    std::os::unix::fs::symlink("/var/log/agent", sandbox.path().join("abs.lnk")).unwrap();
+
+    let cid = String::from_utf8(
+        pf(store.path())
+            .args(["snapshot", "--agent-id", "t", "--fs-root"])
+            .arg(sandbox.path())
+            .assert()
+            .success()
+            .get_output()
+            .stdout
+            .clone(),
+    )
+    .unwrap()
+    .trim()
+    .to_owned();
+
+    // Default checkout: warn + skip absolute symlink, restore the file.
+    let scratch = TempDir::new().unwrap();
+    let dst_default = scratch.path().join("default");
+    pf(store.path())
+        .args(["checkout", &cid, "--into"])
+        .arg(&dst_default)
+        .assert()
+        .success()
+        .stderr(contains("skipped absolute symlink"));
+    assert!(dst_default.join("src/main.py").exists());
+    assert!(
+        !dst_default.join("abs.lnk").exists(),
+        "absolute symlink must be skipped by default"
+    );
+
+    // Opt-in: restore verbatim.
+    let dst_allow = scratch.path().join("allow");
+    pf(store.path())
+        .args(["checkout", &cid, "--allow-absolute-symlinks", "--into"])
+        .arg(&dst_allow)
+        .assert()
+        .success();
+    assert!(dst_allow.join("src/main.py").exists());
+    let link_meta = std::fs::symlink_metadata(dst_allow.join("abs.lnk")).unwrap();
+    assert!(link_meta.file_type().is_symlink());
+    assert_eq!(
+        std::fs::read_link(dst_allow.join("abs.lnk")).unwrap(),
+        std::path::PathBuf::from("/var/log/agent"),
+    );
+}
+
 /// v1.0.13: pf gc --retain-recent N must prune both layer blobs
 /// AND `images/<cid>.json` markers for evicted manifests. The
 /// v1.0.12 retest reproduced "pf log lists CIDs whose pf checkout

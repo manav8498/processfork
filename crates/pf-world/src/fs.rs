@@ -319,15 +319,53 @@ impl WalkFsCapture {
     }
 }
 
+/// Knobs for [`restore_tree_with_options`].
+///
+/// v1.0.14 audit fix: prior versions of `restore_tree` treated any
+/// absolute-target symlink as a hard error that aborted the whole
+/// restore. The auditor flagged this as awkward — captured trees
+/// often contain legitimate absolute symlinks (e.g. `/var/log/agent`)
+/// that the operator wants to keep. New behavior:
+///
+/// - `allow_absolute_symlinks = false` (default): absolute symlinks
+///   are **skipped with an `eprintln!` warning** instead of erroring.
+///   The CVE protection (PF-SA-2026-001 "Zip Slip") is unaffected:
+///   we never WRITE through the symlink, only choose whether to
+///   create it. Skipping is a strict safety improvement over erroring
+///   (the rest of the tree restores; the operator sees what was
+///   skipped) and matches what tar/rsync do.
+/// - `allow_absolute_symlinks = true`: opt-in restore of absolute
+///   symlinks verbatim. The operator explicitly acknowledges that
+///   anything later reading through the symlink may escape the
+///   sandbox.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct RestoreOptions {
+    /// See struct docs. Default: `false` (skip-with-warn).
+    pub allow_absolute_symlinks: bool,
+}
+
 /// Restore a previously-captured tree blob into a fresh directory `dst`.
 ///
 /// The restore is **atomic**: we rebuild into `dst.with_extension("pftmp")`,
 /// `fsync` the parent, then `rename(2)` over `dst`. If `dst` already exists
 /// the call errors — callers can pass a tempdir or pre-clean.
+///
+/// Equivalent to [`restore_tree_with_options`] with [`RestoreOptions::default`].
 pub fn restore_tree(
     blobs: &Arc<dyn BlobStore>,
     tree_digest: &Digest256,
     dst: impl AsRef<Path>,
+) -> pf_core::Result<()> {
+    restore_tree_with_options(blobs, tree_digest, dst, RestoreOptions::default())
+}
+
+/// Restore a tree with operator-supplied options. v1.0.14 — see
+/// [`RestoreOptions`].
+pub fn restore_tree_with_options(
+    blobs: &Arc<dyn BlobStore>,
+    tree_digest: &Digest256,
+    dst: impl AsRef<Path>,
+    opts: RestoreOptions,
 ) -> pf_core::Result<()> {
     let dst = dst.as_ref();
     if dst.exists() {
@@ -391,11 +429,34 @@ pub fn restore_tree(
                         e.path
                     ))
                 })?;
-                // Symlink target hardening: refuse absolute targets and
-                // refuse relative targets that would escape the staging
-                // root. Together with the safe_join above this means a
-                // malicious .pfimg can never write or link outside the
-                // restore directory.
+                // Symlink target hardening:
+                //   - Relative targets that escape the staging root
+                //     are ALWAYS refused (the depth-counter check).
+                //     This is the v1.0.3 PF-SA-2026-001 "Zip Slip"
+                //     fix and is non-negotiable.
+                //   - Absolute targets are gated on
+                //     `opts.allow_absolute_symlinks`:
+                //       false (default): skip-with-warn so the rest
+                //                        of the tree still restores.
+                //       true: restore verbatim; operator opts in.
+                if Path::new(raw_target).is_absolute() {
+                    if opts.allow_absolute_symlinks {
+                        if let Some(parent) = p.parent() {
+                            std::fs::create_dir_all(parent)?;
+                        }
+                        #[cfg(unix)]
+                        std::os::unix::fs::symlink(raw_target, &p)?;
+                        #[cfg(not(unix))]
+                        std::fs::write(&p, raw_target.as_bytes())?;
+                    } else {
+                        eprintln!(
+                            "warning: skipped absolute symlink {} -> {} \
+                             (pass --allow-absolute-symlinks to restore)",
+                            e.path, raw_target
+                        );
+                    }
+                    continue;
+                }
                 check_symlink_target(&staging, &p, raw_target)?;
                 if let Some(parent) = p.parent() {
                     std::fs::create_dir_all(parent)?;
@@ -821,6 +882,91 @@ mod tests {
             format!("{err}").contains("escape") || format!("{err}").contains("refusing"),
             "expected symlink-escape refusal, got {err}"
         );
+    }
+
+    /// v1.0.14: absolute-target symlinks are SKIPPED with a stderr
+    /// warning by default (rather than aborting the whole restore).
+    /// The rest of the tree restores normally, and the operator can
+    /// see what was skipped. This is what tar/rsync do; the v1.0.3
+    /// "Zip Slip" CVE protection is unaffected because we never WRITE
+    /// through the symlink, only choose whether to create it.
+    #[cfg(unix)]
+    #[test]
+    fn absolute_symlink_skipped_by_default_with_rest_restored() {
+        let blobs: Arc<dyn BlobStore> = Arc::new(MemBlobStore::new());
+        let file_blob = blobs.put(b"hello\n").unwrap();
+        let tree = FsTree {
+            kind: "fs.tree.v1".into(),
+            entries: vec![
+                FsTreeEntry {
+                    path: "abs.lnk".into(),
+                    mode: "120777".into(),
+                    size: 9,
+                    kind: FsEntryKind::Symlink,
+                    blob: None,
+                    link_target: Some("/var/log/agent".into()),
+                },
+                FsTreeEntry {
+                    path: "src/main.py".into(),
+                    mode: "100644".into(),
+                    size: 6,
+                    kind: FsEntryKind::File,
+                    blob: Some(file_blob),
+                    link_target: None,
+                },
+            ],
+        };
+        let tree_cid = blobs.put(&serde_json::to_vec(&tree).unwrap()).unwrap();
+        let restore_root = TempDir::new().unwrap();
+        let dst = restore_root.path().join("out");
+        // Default options → restore must succeed; absolute symlink
+        // is skipped; the regular file lands.
+        restore_tree(&blobs, &tree_cid, &dst).unwrap();
+        assert!(
+            !dst.join("abs.lnk").exists(),
+            "absolute symlink must be skipped by default"
+        );
+        assert_eq!(
+            std::fs::read_to_string(dst.join("src/main.py")).unwrap(),
+            "hello\n",
+            "rest of the tree must restore normally"
+        );
+    }
+
+    /// v1.0.14: --allow-absolute-symlinks (RestoreOptions
+    /// equivalent) opts in to restoring absolute targets verbatim.
+    /// Operator explicitly acknowledges the sandbox-escape risk.
+    #[cfg(unix)]
+    #[test]
+    fn allow_absolute_symlinks_restores_them_verbatim() {
+        let blobs: Arc<dyn BlobStore> = Arc::new(MemBlobStore::new());
+        let tree = FsTree {
+            kind: "fs.tree.v1".into(),
+            entries: vec![FsTreeEntry {
+                path: "abs.lnk".into(),
+                mode: "120777".into(),
+                size: 9,
+                kind: FsEntryKind::Symlink,
+                blob: None,
+                link_target: Some("/var/log/agent".into()),
+            }],
+        };
+        let tree_cid = blobs.put(&serde_json::to_vec(&tree).unwrap()).unwrap();
+        let restore_root = TempDir::new().unwrap();
+        let dst = restore_root.path().join("out");
+        restore_tree_with_options(
+            &blobs,
+            &tree_cid,
+            &dst,
+            RestoreOptions {
+                allow_absolute_symlinks: true,
+            },
+        )
+        .unwrap();
+        let link_meta = std::fs::symlink_metadata(dst.join("abs.lnk")).unwrap();
+        assert!(link_meta.file_type().is_symlink());
+        let target = std::fs::read_link(dst.join("abs.lnk")).unwrap();
+        assert_eq!(target.to_str().unwrap(), "/var/log/agent");
     }
 
     /// v1.0.2 audit: 0755 source file restored as 0644.

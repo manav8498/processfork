@@ -4,6 +4,137 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.0.14] — 2026-05-08
+
+Closes the three "left as-is" limitations from v1.0.13. None of
+them was a bug; all three were "we genuinely cannot do this from
+the maintainer's host" or "the safe default is too strict."
+v1.0.14 makes each one materially better without weakening any
+prior security or honesty posture.
+
+### Limitation 1: examples/06 + examples/07 were exit-2 stubs
+
+The local PF_HAS_GPU=1 vLLM/SGLang examples printed "use the
+Modal lane" and exited 2. The Modal lane is still the bit-exact
+validation path, but the examples themselves are now genuinely
+runnable on every host.
+
+- **Mock-mode round-trip on every CI host.** `bash
+  examples/06-vllm-bit-exact/run.sh` (and `examples/07-...`) now
+  drive the adapter's `build_endpoints()` API end-to-end with
+  synthetic K/V pages, asserting byte-identical round-trip across
+  snapshot → checkout. No GPU, no vLLM/SGLang import required —
+  only the `processfork-vllm` / `processfork-sglang` adapter
+  package itself (which ships pure-Python).
+- **Three modes**, decided at runtime:
+  - **No adapter installed** → clean skip with install
+    instructions.
+  - **Adapter installed, no GPU / no vLLM** → mock-mode
+    round-trip (the new default useful path).
+  - **PF_HAS_GPU=1 + adapter + vLLM/SGLang importable** →
+    same flow, plus a footer pointer to the Modal lane for
+    bit-exact validation.
+- Confirmed locally on macOS arm64: both examples round-trip
+  3 synthetic K/V pages byte-identically end-to-end.
+
+### Limitation 2: CRIU Linux+CRIU only
+
+`processfork-criu` and `pf snapshot --criu-pid` remain Linux-
+only by definition (CRIU is a kernel-assisted snapshot system;
+macOS/Windows have no equivalent). v1.0.14 ships a portable
+**respawn** path alongside CRIU, so non-Linux operators get
+something better than `procs.unsupported.v1`.
+
+- **New `pf snapshot --respawn-pid <PID>`** captures a
+  `procs.respawn.v1` blob: argv, cwd, env (Linux only — macOS
+  needs root to read other-process environ; documented), exe
+  path, parent PID, and the paths backing open file descriptors
+  (`/proc/<pid>/fd/*` on Linux; `lsof -p <pid>` on macOS).
+  Captured cross-platform: macOS arm64, Linux, Windows
+  (best-effort; Windows currently emits the kind blob with empty
+  argv/cwd until a Win32 implementation lands).
+- **Respawn ≠ CRIU.** Documented explicitly: respawn captures
+  enough configuration to RE-INVOKE the process from scratch
+  (think deployment metadata + state files); it does NOT capture
+  register state, heap, in-flight syscalls, anonymous memory, or
+  signal masks. Operators who need that fidelity stay on
+  `--criu-pid` (Linux only).
+- `--criu-pid` and `--respawn-pid` are mutually exclusive — pick
+  the right tool for the job. CLI errors out clearly if both are
+  passed.
+- Regression test
+  (`snapshot_respawn_pid_emits_respawn_v1_blob`) snapshots the
+  test process's own PID on macOS and asserts the v1 marker, the
+  argv non-emptiness, and the `captured_on == host_os` tag.
+
+### Limitation 3: absolute symlinks captured but rejected on restore
+
+The v1.0.3 "Zip Slip" CVE fix (PF-SA-2026-001) refused absolute
+symlinks at restore time as a hard error. The auditor flagged
+this as awkward — captured trees often contain legitimate
+absolute symlinks (e.g. `/var/log/agent`). The CVE protection is
+about not WRITING through the symlink; whether to CREATE the
+symlink is a separate decision.
+
+- **Default behavior changed from hard-error to skip-with-warn.**
+  `pf checkout` now skips absolute symlinks with an
+  `eprintln!("warning: skipped absolute symlink ...")` and
+  continues restoring the rest of the tree. This matches what
+  `tar`/`rsync` do and is a strict safety improvement (operator
+  sees what was skipped; the rest of the restore still
+  succeeds).
+- **New `pf checkout --allow-absolute-symlinks`** opt-in flag
+  restores them verbatim. Operator explicitly acknowledges that
+  anything later reading through the symlink may escape the
+  sandbox.
+- The CVE protection is unchanged: relative symlinks that escape
+  the staging root are still HARD-REFUSED (the depth-counter
+  check in `check_symlink_target`); absolute *paths* (vs.
+  *targets*) in the FS tree itself are still HARD-REFUSED via
+  `safe_join`. The only thing that changed is what happens when
+  the operator points a symlink AT an absolute target.
+- New library API: `pf_world::RestoreOptions { allow_absolute_
+  symlinks: bool }`, `restore_tree_with_options(...)`. Existing
+  callers of `restore_tree(...)` get the new safe default
+  automatically.
+- Two regression tests pin the behavior:
+  `absolute_symlink_skipped_by_default_with_rest_restored`
+  (skipped by default, regular files still land);
+  `allow_absolute_symlinks_restores_them_verbatim` (opt-in works,
+  link target round-trips byte-identically).
+
+### Versions
+
+- `processfork` (Rust + Python wheel): 1.0.13 → **1.0.14**
+- All 8 internal `pf-*` crate version pins: → 1.0.14
+- npm `@processfork/sdk`: 1.0.13 → **1.0.14**
+- `processfork-criu`: 1.0.13 → **1.0.14**
+
+### Verification
+
+- `cargo fmt --check`, `cargo clippy --workspace --all-targets
+  -- -D warnings`, `cargo deny check`: clean.
+- `cargo test --workspace`: **216 passed** (was 211; +5).
+- `pytest` across pf-py + pf-claude-code + pf-criu + pf-vllm +
+  pf-sglang: **42 passed, 4 skipped** (CRIU Linux + GPU paths).
+- `node --test crates/pf-ts/test/smoke.mjs`: 8/8.
+- `bash examples/06-vllm-bit-exact/run.sh` and
+  `bash examples/07-sglang-prefix-share/run.sh`: both round-trip
+  3 synthetic K/V pages byte-identically on macOS without GPU.
+
+### What's still not in scope
+
+- **vLLM V1 engine bit-exact KV restore.** vLLM-side fix; V0 +
+  `enforce_eager=True` workaround documented in v1.0.12.
+- **Generic CLI model+cache layer auto-discovery.** "Walk a
+  directory and produce a valid LoRA diff" is the source of most
+  "I restored my agent and it half-worked" reports; the loud
+  warning + adapter-populated path stays the answer.
+- **Live PF_HAS_GPU=1 self-contained vLLM/SGLang test.** The
+  examples now do real adapter round-trip on every host; the
+  bit-exact KV validation against actual vLLM still runs on
+  Modal (`scripts/gpu-validate-modal.py`).
+
 ## [1.0.13] — 2026-05-08
 
 Closes the two confirmed bugs and the one Python SDK lineage gap
