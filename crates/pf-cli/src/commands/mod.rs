@@ -26,6 +26,8 @@ pub mod fork;
 pub mod gc;
 pub mod log;
 pub mod merge;
+pub mod merge_finalize;
+pub mod merge_resolve;
 pub mod snapshot;
 pub mod status;
 pub mod stub;

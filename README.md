@@ -97,7 +97,7 @@ ProcessFork captures the **five things** that together make up a live agent — 
 
 | Layer       | What it captures                                                | v1.0.x status |
 |-------------|-----------------------------------------------------------------|---------------|
-| **World**   | Filesystem (full), env (default-redacted), browser DOM (CDP). In-flight subprocesses **are not** captured by `pf snapshot` — the `procs` blob writes a `procs.unsupported.v1` placeholder unless a CRIU/zombie-restart adapter is wired in. | ✅ FS + env ship; procs = placeholder |
+| **World**   | Filesystem (full), env (default-redacted), browser DOM (CDP). In-flight subprocesses captured via `pf snapshot --criu-pid <PID>` (Linux + `criu` CLI; v1.0.12). Without `--criu-pid`, the `procs` blob is a `procs.unsupported.v1` placeholder. | ✅ FS + env ship; 🟡 procs ships on Linux+CRIU (see [`adapters/pf-criu/`](./adapters/pf-criu/)) |
 | **Effects** | Append-only ledger of tool calls, HMAC-chained per entry (ACRFence). | ✅ ships (CLI + Python SDK + TS SDK + 5 adapters) |
 | **Trace**   | Chat + tool-call message log                                    | ✅ ships |
 | **Model**   | LoRA / IA³ / full-finetune weight diffs, in-place TTT updates. The format and TIES+DARE merge math ship and are exercised on the Modal A10G lane; the **generic CLI snapshot path produces an empty LoRA envelope** because the layer is populated by adapters (vLLM/SGLang/etc.), not by walking a directory. | 🟡 format ships; CLI path is placeholder; adapter-populated |
@@ -116,19 +116,23 @@ Identical content shares storage automatically — 12 parallel forks use **~1.00
 - 5 adapters (Claude Code, LangGraph, OpenInterpreter, AutoGen, CrewAI) over the FS + env + trace + effects layers.
 - vLLM/SGLang **mock** mode: K/V page bytes + manifest persist into the store and read back on checkout.
 
+**Tractable today (v1.0.12 closed three of these from v1.0.11)**:
+
+- **Live in-flight subprocess capture** ✅ via `processfork-criu` (Linux + `criu` CLI required). `pf snapshot --criu-pid <PID>` writes a real `procs.criu.v1` bundle (CRIU images tarball + JSON header). On macOS / Windows / non-criu Linux, the command exits with a clear "CRIU unavailable" message — no silent half-state. Validation runs on the operator's Linux box; the format + gating + non-Linux skip path is unit-tested everywhere. See [`adapters/pf-criu/README.md`](./adapters/pf-criu/) for the full caveat list (this lane has the same shape as the Modal vLLM lane: code ships, validation lives on a host the upstream CI doesn't have).
+- **Conflict-merge resolution UI** ✅ via `pf merge-resolve` / `pf merge-finalize`. When `pf merge` produces conflicts, drop the merged FS into a workdir, hand-edit the marker files, then finalize into a single-parent image. The finalize step refuses to ship as long as files still contain `<<<<<<<` (override with `--force`). Round-trip regression-tested on macOS.
+- **Loud warning on empty engine layers** ✅. The generic CLI snapshot now emits a multi-line stderr warning that model + cache are placeholders and only the FS+env+trace+effects layers were captured. Suppress with `--allow-empty-engine-layers` once your CI has internalized the boundary.
+
 **Not yet production-ready, though the format and code paths exist**:
 
-- **Live in-flight subprocess capture**. The world layer's `procs` blob is a placeholder (`procs.unsupported.v1`); a CRIU-based adapter is the v1.1 deliverable. Today, restored sessions do not bring back live PIDs; they bring back the FS + env + trace + effects state that lets a fresh worker continue.
 - **Local PF_HAS_GPU=1 vLLM/SGLang test** (`examples/06`, `examples/07`, `pf-cache/tests/cache_bit_exact_vllm.rs`). These exit 2 with a "use the adapter packages directly + Modal lane" pointer — they were operator-runs-it skeletons that never got a self-contained subprocess flow. The Modal A10G lane (`scripts/gpu-validate-modal.py`) **does** run vLLM end-to-end and emits the JSONs in [`benchmarks/gpu-validation/`](./benchmarks/gpu-validation/).
-- **Bit-exact KV-cache restore on vLLM V1 engine.** The Modal lane shows V0 engine **`bit_exact: true`** for 38 619 KV pages but **V1 engine = output-equivalent (first-80-chars match)**, not bit-exact, on TinyLlama-1.1B. V1 is using `collective_rpc` and the engine has its own non-determinism in deterministic mode that we do not yet eliminate. Treat live V1 KV restore as "lossy semantic restore" today.
-- **Conflict-merge resolution UI.** The merge engine writes Git-style `<<<<<<<` markers and emits a merged CID; an interactive `pf merge --resolve <cid>` flow is v1.1.
-- **Generic CLI model/cache layer capture.** The generic `pf snapshot` produces empty model + cache envelopes — these layers are populated through adapters, not by walking a directory. If you want the model+cache layers populated, use the vLLM or SGLang adapter from inside your engine process.
+- **Bit-exact KV-cache restore on vLLM V1 engine.** The Modal lane shows V0 engine **`bit_exact: true`** for 38 619 KV pages but **V1 engine = output-equivalent (first-80-chars match)**, not bit-exact, on TinyLlama-1.1B. V1's `collective_rpc` worker scheduling has internal non-determinism that ProcessFork cannot eliminate from the outside. **Workaround for bit-exact replay today**: pin to vLLM V0 engine + pass `enforce_eager=True` to disable CUDA graphs, e.g. `LLM(..., enforce_eager=True)` or `vllm serve ... --enforce-eager`. The V1 path stays output-equivalent until upstream lands deterministic batch scheduling — see [`adapters/pf-vllm/README.md`](./adapters/pf-vllm/) for the full workaround note.
+- **Generic CLI model/cache layer capture.** The generic `pf snapshot` produces empty model + cache envelopes — these layers are populated through adapters (vLLM/SGLang/etc.), not by walking a directory. If you want the model+cache layers populated, use the vLLM or SGLang adapter from inside your engine process. The empty path now warns loudly by default.
 
 → **[Architecture deep-dive](./docs/src/architecture.md)** · **[Three-way merge protocol](./docs/src/merge.md)** · **[Engineering specs](./agent_docs/)**
 
 ## Status
 
-`v1.0.11` tagged. Documentation honesty pass after the v1.0.10 retest: the README's "ships now" framing on vLLM/SGLang and the "bit-exact" metric row were not telling the same story as `benchmarks/gpu-validation/*.json` and the `examples/06`+`07` runners that exit 2 under `PF_HAS_GPU=1`. This release does not change runtime behavior — the v1.0.10 fixes (TS SDK scrub + HMAC ledger), v1.0.9 fixes (Python SDK scrub + HMAC ledger), and earlier audit-round fixes all stand. What it changes: the adapter status table separates **mock** from **live (Modal lane)**; the 5-layer table marks **Model** and **Cache** as adapter-populated (the generic CLI path emits empty envelopes); a new "What does and doesn't ship in v1.0.x" subsection makes the boundary explicit (no in-flight subprocess capture; no local PF_HAS_GPU=1 self-contained vLLM test; no V1-engine bit-exactness; no conflict-resolution UI). The example runners and the `cache_bit_exact_vllm.rs` panic message are also updated to point at the actually-true status. `cargo deny check`: still `advisories ok, bans ok, licenses ok, sources ok`.
+`v1.0.12` tagged. Closes three of the four "not-yet-production-ready" items v1.0.11 made explicit. **Conflict-merge resolution UI** ships as `pf merge-resolve` + `pf merge-finalize` — round-trip regression-tested on macOS. **Live in-flight subprocess capture** ships as the new `processfork-criu` adapter + `pf snapshot --criu-pid <PID>` flag (Linux + `criu` CLI required; format/gating tested everywhere; live `criu dump`/`criu restore` validation runs on the operator's Linux box, same shape as the Modal vLLM lane). **Empty engine layers** now emit a multi-line stderr warning by default (suppress with `--allow-empty-engine-layers`); the empty model+cache envelopes carry a `note: generic-cli-empty` field so downstream tooling can detect them. The fourth item — **V1-engine bit-exact KV restore** — is a vLLM-side change beyond ProcessFork's reach; the V0 + `enforce_eager=True` workaround is now documented in [`adapters/pf-vllm/README.md`](./adapters/pf-vllm/) for callers who need byte-identical replay today. `cargo deny check`: still `advisories ok, bans ok, licenses ok, sources ok`.
 
 | metric                                                 | observed                 | target           |
 |--------------------------------------------------------|--------------------------|------------------|
@@ -138,8 +142,8 @@ Identical content shares storage automatically — 12 parallel forks use **~1.00
 | KV-cache restore, **vLLM V1 engine** (`collective_rpc`) | **output-equivalent, not bit-exact** — first-80-chars match across snapshot/restore on 38 599 KV pages ([JSON](./benchmarks/gpu-validation/2026-05-06-modal-a10g-vllm-v1.json)); `bit_exact: false` field is the source of truth | `out_a == out_b` byte-equal (target unmet on V1) |
 | Cache capture, 64 pages                                | 531 µs                   | —                |
 | 12-fork ÷ 1-fork storage ratio (auditor's matrix)      | **1.004×**               | ≤ 1.5×           |
-| Total Rust tests passing                               | **199**                  | —                |
-| Python SDK + Claude adapter tests                      | **17**                   | —                |
+| Total Rust tests passing                               | **204** (incl. v1.0.12 merge-resolve/finalize + criu-pid macOS gate) | — |
+| Python SDK + Claude + CRIU adapter tests               | **25 passed, 2 skipped** (CRIU Linux-only paths) | — |
 | TS SDK smoke tests                                     | **8** (incl. 3 v1.0.10 regressions) | —     |
 
 Synthetic-fixture numbers come from `cargo bench --workspace`. GPU numbers come from `modal run scripts/gpu-validate-modal.py`; raw JSON lives in [`benchmarks/gpu-validation/`](./benchmarks/gpu-validation/) and the breakdown in [`benchmarks/RESULTS.md`](./benchmarks/RESULTS.md). The local PF_HAS_GPU=1 paths in `examples/06` and `examples/07` are not the validation path — they exit 2 with a Modal-lane pointer; the validation IS the Modal lane, and the JSONs above are its output.
@@ -162,6 +166,7 @@ pip install "processfork-vllm[vllm]"               # needs CUDA + vllm ≥ 0.10
 pip install "processfork-sglang[sglang]"           # needs CUDA + sglang ≥ 0.5
 pip install "processfork-autogen[autogen]"
 pip install "processfork-crewai[crewai]"
+pip install processfork-criu                       # Linux only; needs `criu` CLI on $PATH
 ```
 
 **Build from source** if you want to hack on it:

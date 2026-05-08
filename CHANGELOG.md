@@ -4,6 +4,136 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.0.12] — 2026-05-07
+
+Closes the four "not-yet-production-ready" items v1.0.11 made
+explicit. Two of them are runtime features (conflict-merge UI,
+CRIU subprocess capture); two are honesty/UX (loud warnings on
+empty engine layers, V1-engine workaround documented). One — V1
+bit-exact KV restore — remains a vLLM-side change beyond
+ProcessFork's reach and is now documented with the V0 +
+`enforce_eager=True` workaround.
+
+### `pf merge-resolve` / `pf merge-finalize` — interactive conflict resolution
+
+- New top-level commands. Replace the v1.1-deferred placeholder
+  with a real round-trip:
+    1. `pf merge A B` → if conflicts, exits 3 with the resolve+
+       finalize hint pointing at the merged-CID.
+    2. `pf merge-resolve <merged-cid> --workdir <dir>` extracts
+       the merged FS into `<dir>` (which must NOT pre-exist),
+       scans for Git-style markers, and prints the conflict
+       file list.
+    3. Operator hand-edits.
+    4. `pf merge-finalize <merged-cid> --workdir <dir>` re-walks
+       the resolved tree, builds a single-parent image whose
+       parent is `<merged-cid>`, returns the finalized CID.
+- `pf merge-finalize` refuses if any file in `<dir>` still
+  contains conflict markers (exit code 3); pass `--force` to
+  finalize as-is (for tree fixtures with legitimate `<<<<<<<`
+  content).
+- Scan covers all three Git marker variants (`<<<<<<<`,
+  `=======`, `>>>>>>>`); skips symlinks and binary files (NUL
+  byte heuristic).
+- Round-trip regression test (`merge_resolve_finalize_round_trip`)
+  exercises: snapshot-X-A-B-with-parent → conflicting merge →
+  resolve workdir → finalize-without-resolution-fails →
+  hand-resolve → finalize succeeds → finalized image's
+  manifest.parents == [merged-cid] → checkout shows resolved
+  content with no markers. `--force` path tested separately.
+
+### `processfork-criu` adapter + `pf snapshot --criu-pid <PID>`
+
+- New Python package `processfork-criu` (Linux-only at runtime)
+  promotes the world layer's `procs` blob from
+  `procs.unsupported.v1` to `procs.criu.v1`. The bundle is a
+  header-line JSON dict + raw tarball of CRIU's `images-dir`
+  output, ready for `pf verify` to round-trip.
+- New CLI flag `pf snapshot --criu-pid <PID>` shells out to
+  `python3 -m processfork_criu` (via inline script) to perform
+  the dump. On macOS / Windows / non-criu Linux hosts the
+  command exits with a clear "CRIU unavailable: …" message and
+  the snapshot fails fast — no silent half-state.
+- Python API: `processfork_criu.dump_pid(pid, leave_running=True,
+  tcp_established=False)` returns a `CriuBundle` whose
+  `serialize()` is the on-disk format; `restore_bundle(bundle,
+  target_dir=...)` returns the new PID after `criu restore`.
+- Test layering reflects the honesty caveat (same as the Modal
+  vLLM lane: code is committed, validation lives where the
+  kernel lives):
+    - **Layer 1 — runs on every host (8 tests):** version match,
+      v1 marker constants, header+tarball envelope round-trips,
+      deserialize rejects wrong-kind / missing-newline,
+      `is_available()` False on macOS, `dump_pid` /
+      `restore_bundle` raise clean RuntimeError on macOS.
+    - **Layer 2 — Linux only, no criu needed (1 test, skips on
+      macOS):** `is_available()` reflects whether `criu` is on
+      `$PATH`.
+    - **Layer 3 — Linux + criu binary (1 test, skips otherwise):**
+      end-to-end: spawn a heartbeat-writing Python child,
+      `criu dump` it, SIGKILL the original PID, `criu restore`,
+      assert the restored PID writes new heartbeats. **This is
+      the operator-runs-it validation; the maintainer's macOS
+      CI has not run it.** README has the caveat.
+- Rust-side test (`snapshot_criu_pid_fails_cleanly_on_non_linux`)
+  confirms `pf snapshot --criu-pid 1` on macOS exits non-zero
+  with stderr mentioning CRIU/python3 (no panic, no silent empty
+  procs blob).
+
+### Loud warning when generic CLI snapshot writes empty engine layers
+
+- `pf snapshot` now emits a multi-line stderr warning explaining
+  that the model + cache layers are empty and that engine state
+  requires the vLLM/SGLang adapter to populate. World (FS+env),
+  trace, and effects ARE captured.
+- New `--allow-empty-engine-layers` flag suppresses the warning
+  for CI/automation that has internalized the boundary.
+- The empty model + cache envelopes now carry a `"note":
+  "generic-cli-empty: populated by adapters, not by walking a
+  directory"` field so downstream tooling can detect them.
+
+### V1-engine bit-exact workaround documented
+
+- `adapters/pf-vllm/README.md` gets a new "Bit-exact replay: V0
+  vs V1 engine" section with the **V0 + `enforce_eager=True`**
+  workaround for callers who need byte-identical regenerated
+  output. Calls out the throughput cost (1.3–1.8× slower
+  without CUDA graphs), V0's feature-frozen status upstream,
+  and when V1 + output-equivalent is acceptable (snapshot
+  before destructive change vs. RL rollout reproducibility).
+- README's bit-exact metric row links to this section.
+
+### Versions
+
+- `processfork` (Rust + Python wheel): 1.0.11 → **1.0.12**
+- All 8 internal `pf-*` crate version pins: → 1.0.12
+- npm `@processfork/sdk`: 1.0.11 → **1.0.12**
+- New `processfork-criu` Python package: **1.0.12**
+
+### Verification
+
+- `cargo fmt --check`, `cargo clippy --workspace --all-targets
+  -- -D warnings`, `cargo deny check`: clean.
+- `cargo test --workspace`: 204 passed (was 199; +5 from the
+  merge-resolve / merge-finalize / criu-pid integration tests).
+- `pytest crates/pf-py/python/tests/ adapters/pf-claude-code/tests/
+  adapters/pf-criu/tests/`: 25 passed, 2 skipped (CRIU Linux-
+  only paths).
+- `node --test crates/pf-ts/test/smoke.mjs`: 8/8.
+- `pf snapshot --criu-pid 1` on macOS: exits non-zero with
+  "CRIU is Linux-only" — no panic.
+
+### What's still not in scope
+
+- **vLLM V1 engine bit-exact KV restore.** Documented workaround
+  (V0 + `enforce_eager`); upstream V1 deterministic batch
+  scheduling is the actual fix and lives in vllm/.
+- **Generic CLI model/cache layer auto-discovery.** The "walk a
+  directory and produce a valid LoRA diff" approach is the
+  source of most "I restored my agent and it half-worked"
+  reports; we keep the empty-envelope-with-loud-warning path
+  instead.
+
 ## [1.0.11] — 2026-05-07
 
 Documentation honesty pass. The v1.0.10 retest confirmed 12/12 of the

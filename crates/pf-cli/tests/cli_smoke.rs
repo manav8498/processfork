@@ -7,6 +7,7 @@ use std::path::Path;
 
 use assert_cmd::Command;
 use pf_core::store::PfStore;
+use predicates::prelude::PredicateBooleanExt;
 use predicates::str::contains;
 use tempfile::TempDir;
 
@@ -772,4 +773,256 @@ fn snapshot_scrub_env_redacts_matching_keys() {
         env_text.contains("this-is-fine"),
         "non-matching var should be preserved"
     );
+}
+
+/// v1.0.12: full pf merge → pf merge-resolve → pf merge-finalize round-trip.
+/// Snapshot a common ancestor X, then snapshot two divergent edits A and B
+/// (each declaring X as parent). Merging A and B must report a conflict;
+/// the resolution flow must drop the merged FS into a workdir, expose the
+/// conflict-markered file, and on a second invocation produce a clean
+/// finalized image with the merged-cid as its parent.
+#[test]
+#[allow(clippy::too_many_lines)] // single linear narrative is easier to audit
+fn merge_resolve_finalize_round_trip() {
+    let store = TempDir::new().unwrap();
+
+    // Common ancestor: README + main.py.
+    let sandbox_x = TempDir::new().unwrap();
+    std::fs::create_dir_all(sandbox_x.path().join("src")).unwrap();
+    std::fs::write(sandbox_x.path().join("src").join("main.py"), "v0\n").unwrap();
+    std::fs::write(sandbox_x.path().join("README.md"), "# v0\n").unwrap();
+    let cid_x = String::from_utf8(
+        pf(store.path())
+            .args(["snapshot", "--agent-id", "t", "--fs-root"])
+            .arg(sandbox_x.path())
+            .assert()
+            .success()
+            .get_output()
+            .stdout
+            .clone(),
+    )
+    .unwrap()
+    .trim()
+    .to_owned();
+
+    // Branch A: edits main.py.
+    let sandbox_a = TempDir::new().unwrap();
+    std::fs::create_dir_all(sandbox_a.path().join("src")).unwrap();
+    std::fs::write(
+        sandbox_a.path().join("src").join("main.py"),
+        "branch_a_change\n",
+    )
+    .unwrap();
+    std::fs::write(sandbox_a.path().join("README.md"), "# v0\n").unwrap();
+    let cid_a = String::from_utf8(
+        pf(store.path())
+            .args(["snapshot", "--agent-id", "t", "--fs-root"])
+            .arg(sandbox_a.path())
+            .args(["--parent", &cid_x])
+            .assert()
+            .success()
+            .get_output()
+            .stdout
+            .clone(),
+    )
+    .unwrap()
+    .trim()
+    .to_owned();
+
+    // Branch B: conflicting edit to main.py.
+    let sandbox_b = TempDir::new().unwrap();
+    std::fs::create_dir_all(sandbox_b.path().join("src")).unwrap();
+    std::fs::write(
+        sandbox_b.path().join("src").join("main.py"),
+        "branch_b_change\n",
+    )
+    .unwrap();
+    std::fs::write(sandbox_b.path().join("README.md"), "# v0\n").unwrap();
+    let cid_b = String::from_utf8(
+        pf(store.path())
+            .args(["snapshot", "--agent-id", "t", "--fs-root"])
+            .arg(sandbox_b.path())
+            .args(["--parent", &cid_x])
+            .assert()
+            .success()
+            .get_output()
+            .stdout
+            .clone(),
+    )
+    .unwrap()
+    .trim()
+    .to_owned();
+
+    // pf merge A B should exit 3 (MergeConflict) AND mention the new
+    // resolve-finalize hint. The merged-CID is in the stdout output
+    // ("merged   : sha256:...").
+    let out = pf(store.path())
+        .args(["merge", &cid_b, "--into", &cid_a])
+        .assert()
+        .failure()
+        .stderr(contains("pf merge-resolve"))
+        .stderr(contains("pf merge-finalize"))
+        .get_output()
+        .clone();
+    let stdout = String::from_utf8(out.stdout).unwrap();
+    let merged_cid = stdout
+        .lines()
+        .find_map(|l| l.strip_prefix("merged   : "))
+        .expect("pf merge stdout must include `merged   : <cid>`")
+        .trim()
+        .to_owned();
+    assert!(merged_cid.starts_with("sha256:"));
+
+    // pf merge-resolve drops the merged FS into a workdir + reports
+    // the conflict-markered files. Workdir must NOT pre-exist.
+    let workdir_root = TempDir::new().unwrap();
+    let workdir = workdir_root.path().join("resolve");
+    pf(store.path())
+        .args(["merge-resolve", &merged_cid, "--workdir"])
+        .arg(&workdir)
+        .assert()
+        .success()
+        .stdout(contains("file(s) need resolution"))
+        .stdout(contains("src/main.py"));
+
+    // The conflict file should literally contain Git-style markers.
+    let conflicted = std::fs::read_to_string(workdir.join("src").join("main.py")).unwrap();
+    assert!(
+        conflicted.contains("<<<<<<<") && conflicted.contains(">>>>>>>"),
+        "merged FS must carry conflict markers, got: {conflicted:?}"
+    );
+
+    // Without resolution, merge-finalize must REFUSE (exit 3).
+    pf(store.path())
+        .args(["merge-finalize", &merged_cid, "--workdir"])
+        .arg(&workdir)
+        .assert()
+        .failure()
+        .stderr(contains("still contain conflict markers"));
+
+    // Hand-resolve and try again.
+    std::fs::write(
+        workdir.join("src").join("main.py"),
+        "branch_a_change\nbranch_b_change\n",
+    )
+    .unwrap();
+
+    let final_out = String::from_utf8(
+        pf(store.path())
+            .args(["merge-finalize", &merged_cid, "--workdir"])
+            .arg(&workdir)
+            .assert()
+            .success()
+            .stdout(contains("finalized:"))
+            .get_output()
+            .stdout
+            .clone(),
+    )
+    .unwrap();
+    let final_cid = final_out
+        .lines()
+        .find_map(|l| l.strip_prefix("finalized: "))
+        .expect("merge-finalize stdout must include `finalized: <cid>`")
+        .trim()
+        .to_owned();
+    assert!(final_cid.starts_with("sha256:"));
+    assert_ne!(final_cid, merged_cid);
+
+    // Verify the finalized image:
+    //   - has merged_cid as its single parent (closes the merge).
+    //   - its FS no longer carries conflict markers.
+    let restored = TempDir::new().unwrap();
+    let restore_path = restored.path().join("out");
+    pf(store.path())
+        .args(["checkout", &final_cid, "--into"])
+        .arg(&restore_path)
+        .assert()
+        .success();
+    let restored_main = std::fs::read_to_string(restore_path.join("src").join("main.py")).unwrap();
+    assert!(!restored_main.contains("<<<<<<<"));
+    assert_eq!(restored_main, "branch_a_change\nbranch_b_change\n");
+
+    // The finalized image's manifest must list merged_cid as its
+    // single parent — that's what closes the merge in the DAG.
+    let store_handle = PfStore::open(store.path()).unwrap();
+    let final_digest = pf_core::digest::Digest256::parse(&final_cid).unwrap();
+    let final_manifest = store_handle.get_manifest(&final_digest).unwrap();
+    assert_eq!(final_manifest.parents.len(), 1);
+    assert_eq!(final_manifest.parents[0].as_str(), merged_cid);
+
+    // x_y_z context: keep the parent vars used so cid_a / cid_b /
+    // cid_x are not flagged unused; they're documented in the test
+    // narrative and would surface in a richer DAG check on demand.
+    let _ = (cid_a, cid_b, cid_x);
+}
+
+/// v1.0.12: `pf snapshot --criu-pid` invokes the processfork-criu
+/// adapter via python3. On macOS the adapter's gating reports
+/// "CRIU is Linux-only" and the CLI must surface that as a clean
+/// failure, not a panic or a silent empty procs blob.
+///
+/// The test runs unconditionally (every CI host has a /bin/sh and
+/// most have python3); if python3 is missing or processfork-criu
+/// isn't importable the failure message is still informative and
+/// the assertions still hold (we don't check the exact wording,
+/// just that the command failed and stderr mentions criu).
+#[cfg(not(target_os = "linux"))]
+#[test]
+fn snapshot_criu_pid_fails_cleanly_on_non_linux() {
+    let store = TempDir::new().unwrap();
+    let sandbox = TempDir::new().unwrap();
+    make_sandbox(sandbox.path());
+    pf(store.path())
+        .args(["snapshot", "--agent-id", "t", "--fs-root"])
+        .arg(sandbox.path())
+        .args(["--criu-pid", "1"]) // pid 1 is universal, no real dump attempted
+        .assert()
+        .failure()
+        .stderr(
+            contains("criu")
+                .or(contains("CRIU"))
+                .or(contains("python3")),
+        );
+}
+
+/// v1.0.12: --force overrides the conflict-marker scan in
+/// merge-finalize. Operators with legitimate `<<<<<<<` content in
+/// their tree (e.g. test fixtures for the merge engine itself)
+/// should be able to opt out.
+#[test]
+fn merge_finalize_force_skips_marker_scan() {
+    let store = TempDir::new().unwrap();
+    let sandbox = TempDir::new().unwrap();
+    make_sandbox(sandbox.path());
+    let cid = String::from_utf8(
+        pf(store.path())
+            .args(["snapshot", "--agent-id", "t", "--fs-root"])
+            .arg(sandbox.path())
+            .assert()
+            .success()
+            .get_output()
+            .stdout
+            .clone(),
+    )
+    .unwrap()
+    .trim()
+    .to_owned();
+
+    // Drop a workdir with literal conflict-marker content + finalize
+    // with --force; should succeed and produce a child of `cid`.
+    let workdir_root = TempDir::new().unwrap();
+    let workdir = workdir_root.path().join("with_markers");
+    std::fs::create_dir_all(&workdir).unwrap();
+    std::fs::write(
+        workdir.join("fixture.txt"),
+        "<<<<<<<\nfoo\n=======\nbar\n>>>>>>>\n",
+    )
+    .unwrap();
+    pf(store.path())
+        .args(["merge-finalize", &cid, "--workdir"])
+        .arg(&workdir)
+        .arg("--force")
+        .assert()
+        .success()
+        .stdout(contains("finalized:"));
 }

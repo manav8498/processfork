@@ -79,8 +79,13 @@ pub fn run(store_root: &Path, args: Args) -> anyhow::Result<()> {
 
     if report.overall == MergeOutcome::Conflicted {
         return Err(CliError::MergeConflict(format!(
-            "{} conflict(s); resolve and run `pf merge --continue` (planned for v1.1)",
-            report.world.conflicts.len()
+            "{} conflict(s) — resolve with:\n  \
+             pf merge-resolve {} --workdir /tmp/resolve\n  \
+             # edit the conflict-markered files in /tmp/resolve\n  \
+             pf merge-finalize {} --workdir /tmp/resolve",
+            report.world.conflicts.len(),
+            report.merged_cid,
+            report.merged_cid,
         ))
         .into());
     }

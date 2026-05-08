@@ -1,0 +1,22 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "processfork-criu"
+version = "1.0.12"
+description = "ProcessFork CRIU adapter — Linux in-flight subprocess capture (procs.criu.v1)."
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.9"
+authors = [{ name = "manav8498", email = "manavpatel91570@gmail.com" }]
+dependencies = ["processfork>=1.0.12"]
+
+# CRIU's Python bindings ("python3-criu") are distro-only (Debian/Ubuntu/
+# Fedora packages). Users typically install the `criu` CLI binary
+# instead via apt/yum, which this adapter shells out to. There's no
+# extras_require for that — the adapter's `is_available()` reports
+# what's actually present at runtime so the operator knows.
+
+[tool.hatch.build.targets.wheel]
+packages = ["processfork_criu"]

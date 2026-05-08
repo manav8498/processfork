@@ -114,6 +114,43 @@ pub struct Args {
     /// succeeded or failed). Pair with `--quiesce-cmd`.
     #[arg(long)]
     pub resume_cmd: Option<String>,
+
+    /// PID to capture via the processfork-criu adapter (Linux only).
+    /// When set, the world layer's `procs` blob is `procs.criu.v1`
+    /// (a real CRIU image bundle) instead of `procs.unsupported.v1`
+    /// (a placeholder).
+    ///
+    /// The flag invokes `python3 -m processfork_criu` to perform the
+    /// dump — the adapter must be installed (`pip install
+    /// processfork-criu`) and `criu` must be on `$PATH` with
+    /// `CAP_SYS_ADMIN` (or root, or a configured CRIU socket).
+    /// Errors out cleanly on macOS, Windows, or any host where
+    /// `processfork_criu.is_available()` reports False.
+    ///
+    /// The adapter README has the full caveat list:
+    /// `adapters/pf-criu/README.md`. Validation lives on the
+    /// operator's Linux box, not on the upstream macOS CI host —
+    /// same shape as the Modal vLLM lane.
+    #[arg(long)]
+    pub criu_pid: Option<i32>,
+
+    /// Suppress the v1.0.12 stderr warning that the generic CLI
+    /// snapshot produces empty model + cache layer envelopes.
+    ///
+    /// The warning fires by default because operators who think
+    /// `pf snapshot` captured "the whole agent" have been surprised
+    /// to find that restored sessions start with a fresh model +
+    /// fresh KV cache. Pass this flag once you've internalized that
+    /// engine state requires the vLLM/SGLang adapter to populate;
+    /// the world (FS+env), trace, and effects layers are captured
+    /// regardless.
+    ///
+    /// CI/automation that already routes through an adapter (the
+    /// adapter sets the model + cache layers via SDK) should pass
+    /// this flag; the warning is for interactive humans on the CLI
+    /// without an adapter.
+    #[arg(long)]
+    pub allow_empty_engine_layers: bool,
 }
 
 // `pf snapshot run()` accumulated a fair amount of validation +
@@ -206,12 +243,31 @@ pub fn run(store_root: &Path, args: Args) -> anyhow::Result<()> {
             .map_err(|e| CliError::BadInput(format!("--scrub-env regex {pat:?}: {e}")))?;
     }
     let env_digest = env_capture.capture(&blobs)?;
-    let procs_blob = serde_json::json!({
-        "kind": "procs.unsupported.v1",
-        "unsupported_on": std::env::consts::OS,
-        "note": "pf snapshot does not capture in-flight subprocesses without the CRIU adapter",
-    });
-    let procs_digest = blobs.put(&serde_json::to_vec(&procs_blob)?)?;
+
+    // Procs layer.
+    //
+    // Without --criu-pid we write `procs.unsupported.v1` — a
+    // placeholder making it explicit that no live subprocess state
+    // was captured. With --criu-pid we shell out to
+    // `python3 -m processfork_criu --pid N` (the adapter), which
+    // performs `criu dump`, builds the v1 envelope, and prints the
+    // serialized bytes to stdout. We write those bytes verbatim
+    // into a CAS blob.
+    //
+    // The adapter is Linux-only; on macOS/Windows the call exits
+    // non-zero with a clear message and we surface that to the
+    // operator. v1.0.12 audit fix: closes the v1.0.11 README's
+    // "always placeholder" gap on the world layer's procs row.
+    let procs_digest = if let Some(pid) = args.criu_pid {
+        capture_criu_procs(&blobs, pid)?
+    } else {
+        let procs_blob = serde_json::json!({
+            "kind": "procs.unsupported.v1",
+            "unsupported_on": std::env::consts::OS,
+            "note": "pf snapshot does not capture in-flight subprocesses without --criu-pid",
+        });
+        blobs.put(&serde_json::to_vec(&procs_blob)?)?
+    };
 
     // Trace. v1.0.4 audit fix: validate the JSONL content (not just
     // the path) so a malformed file fails the snapshot rather than
@@ -395,20 +451,38 @@ pub fn run(store_root: &Path, args: Args) -> anyhow::Result<()> {
         }
     };
 
-    // Model (empty Lora envelope).
+    // Model + cache layers: the generic CLI snapshot path always
+    // emits empty envelopes because these layers are populated by
+    // adapters (vLLM / SGLang / TGI) that know the engine's
+    // internals — there is no "walk a directory and produce a
+    // valid LoRA diff" heuristic that doesn't lie. v1.0.12 audit
+    // fix: shout about it instead of silently writing empties so
+    // operators don't think they captured engine state.
+    if !args.allow_empty_engine_layers {
+        eprintln!("warning: pf snapshot wrote EMPTY model + cache envelopes.");
+        eprintln!("         The world (FS + env), trace, and effects layers WERE captured.");
+        eprintln!("         Restored sessions will start with a fresh model + empty KV cache.");
+        eprintln!("         To capture engine state, install processfork-vllm[vllm] or");
+        eprintln!("         processfork-sglang[sglang] and call the SDK from inside the");
+        eprintln!(
+            "         engine process. Suppress this warning with --allow-empty-engine-layers"
+        );
+        eprintln!("         once your CI/automation has internalized the boundary.");
+    }
     let model_envelope = serde_json::json!({
         "layout": "model.diff.v1",
         "diff": {"kind": "lora", "adapters": []},
+        "note": "generic-cli-empty: populated by adapters, not by walking a directory",
     });
     let model_diff = blobs.put(&serde_json::to_vec(&model_envelope)?)?;
     let model_base = blobs.put(format!("base:{}", args.agent_id).as_bytes())?;
 
-    // Cache (empty page manifest).
     let cache_envelope = serde_json::json!({
         "layout": "paged-batchinvariant-v1",
         "page_size_tokens": 16,
         "n_layers": 0, "n_heads": 0, "head_dim": 0, "dtype": "bf16",
         "pages": [], "logical_seqs": [],
+        "note": "generic-cli-empty: populated by adapters, not by walking a directory",
     });
     let cache_manifest = blobs.put(&serde_json::to_vec(&cache_envelope)?)?;
 
@@ -565,4 +639,65 @@ fn run_shell(cmd: &str) -> anyhow::Result<()> {
         let stderr = String::from_utf8_lossy(&out.stderr);
         anyhow::bail!("exit {}: {}", out.status, stderr.trim())
     }
+}
+
+/// Drive the `processfork-criu` adapter to dump a live PID into a
+/// `procs.criu.v1` blob. Writes the serialized bundle bytes
+/// (header line + tarball body) verbatim to the CAS, returns the
+/// digest. Runs only when `--criu-pid <PID>` is supplied; the
+/// adapter itself enforces Linux + criu binary + permissions.
+///
+/// We invoke the adapter via `python3 -c "..."` rather than a
+/// dedicated CLI entry point so the adapter package and the Rust
+/// CLI stay loosely coupled: the contract is just "the dump_pid()
+/// API returns serialize()-able bytes." If the adapter isn't
+/// installed, the import fails fast with a clear message.
+fn capture_criu_procs(
+    blobs: &Arc<dyn pf_core::cas::BlobStore>,
+    pid: i32,
+) -> anyhow::Result<pf_core::digest::Digest256> {
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+
+    let script = "\
+import sys\n\
+try:\n\
+    import processfork_criu as pfc\n\
+except ImportError as e:\n\
+    sys.stderr.write(f'processfork_criu not installed: {e}\\n')\n\
+    sys.stderr.write('Run: pip install processfork-criu\\n')\n\
+    sys.exit(2)\n\
+reason = pfc.unavailable_reason()\n\
+if reason:\n\
+    sys.stderr.write(f'CRIU unavailable: {reason}\\n')\n\
+    sys.exit(2)\n\
+pid = int(sys.argv[1])\n\
+bundle = pfc.dump_pid(pid=pid, leave_running=True)\n\
+sys.stdout.buffer.write(bundle.serialize())\n\
+";
+
+    let mut child = Command::new("python3")
+        .arg("-c")
+        .arg(script)
+        .arg(pid.to_string())
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| {
+            anyhow::anyhow!(
+                "--criu-pid: failed to spawn python3: {e}. \
+                             Install Python 3 + `pip install processfork-criu`."
+            )
+        })?;
+    let stdin_handle = child.stdin.take();
+    if let Some(mut s) = stdin_handle {
+        let _ = s.write_all(b"");
+    }
+    let output = child.wait_with_output()?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        anyhow::bail!("--criu-pid {pid} failed: {}", stderr.trim());
+    }
+    Ok(blobs.put(&output.stdout)?)
 }

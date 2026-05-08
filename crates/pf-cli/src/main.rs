@@ -49,6 +49,12 @@ enum Command {
     Checkout(commands::checkout::Args),
     /// Three-way merge B into A.
     Merge(commands::merge::Args),
+    /// Drop a conflicted merge image's FS into a workdir for hand-editing.
+    /// Pair with `pf merge-finalize`. (v1.0.12)
+    MergeResolve(commands::merge_resolve::Args),
+    /// Capture a resolved workdir as a new single-parent image whose
+    /// parent is the merged-CID. Pair with `pf merge-resolve`. (v1.0.12)
+    MergeFinalize(commands::merge_finalize::Args),
     /// Push an image to a registry (`hf://…`, `s3://…`, `ipfs://…`, `oci://…`).
     Push(commands::stub::PushArgs),
     /// Pull an image from a registry.
@@ -79,6 +85,8 @@ fn main() -> std::process::ExitCode {
         Command::Fork(a) => commands::fork::run(&store_root, a),
         Command::Checkout(a) => commands::checkout::run(&store_root, a),
         Command::Merge(a) => commands::merge::run(&store_root, a),
+        Command::MergeResolve(a) => commands::merge_resolve::run(&store_root, a),
+        Command::MergeFinalize(a) => commands::merge_finalize::run(&store_root, a),
         Command::Log(a) => commands::log::run(&store_root, a),
         Command::Diff(a) => commands::diff::run(&store_root, a),
         Command::Status => commands::status::run(&store_root),
