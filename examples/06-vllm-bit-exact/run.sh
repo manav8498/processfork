@@ -9,30 +9,42 @@ set -euo pipefail
 
 if [[ "${PF_HAS_GPU:-0}" != "1" ]]; then
     cat <<'EOF'
-┌─ ProcessFork example 06: vllm-bit-exact ──────────────────
-│ skipped: needs PF_HAS_GPU=1 + a CUDA host + vllm ≥ 0.10.
+┌─ ProcessFork example 06: vllm-bit-exact (v1.0.x: Modal lane) ─
+│ This example is a SKELETON. It is intentionally not a self-
+│ contained "spawn vllm + run pf snapshot + assert bit-exact"
+│ flow on your local box.
 │
-│ This example exists as the v1.0 "operator-runs-it" deliverable per
-│ agent_docs/feature-spec.md M5. The wire format and trait surface are
-│ stable (see crates/pf-cache/, agent_docs/cache-layer.md). The live
-│ FFI shim into vllm.worker.cache_engine lands in v1.0.1.
+│ The actual vLLM bit-exact validation runs on Modal:
+│   modal run scripts/gpu-validate-modal.py
 │
-│ When you have a CUDA box:
-│   PF_HAS_GPU=1 bash examples/06-vllm-bit-exact/run.sh
+│ Latest results (vLLM V0 engine + TinyLlama-1.1B + Modal A10G):
+│   bit_exact: true, 38 619 KV pages, byte-identical output
+│   benchmarks/gpu-validation/2026-05-06-modal-a10g.json
 │
-│ Runs:
-│   1. vllm serve meta-llama/Llama-3-8B --enforce-deterministic
-│   2. POST /v1/completions for 50 tokens; record logits of token 49
-│   3. POST /v1/processfork/snapshot                         → cid
-│   4. SIGKILL the worker
-│   5. Spawn fresh vllm; POST /v1/processfork/checkout cid
-│   6. POST /v1/completions for 100 more tokens
-│   7. assert logit-bit-equal at the resumed branch's token 50
+│ V1 engine (collective_rpc): output-equivalent (first-80-chars
+│ match) but bit_exact: false. Treat live V1 KV restore as
+│ "lossy semantic restore" today — see README "What does and
+│ doesn't ship in v1.0.x".
+│
+│ For interactive use of the vLLM adapter today, install
+│ processfork-vllm[vllm] and call pf.snapshot/checkout from
+│ inside your engine process — that's the supported path.
 └─
 EOF
     exit 0
 fi
 
-echo "PF_HAS_GPU=1 set, but the vllm live wiring is the v1.0.1 deferred deliverable."
-echo "See adapters/pf-vllm/README.md for the design and v1.0.1 milestones."
+cat <<'EOF'
+PF_HAS_GPU=1 was set, but examples/06 has never been a local self-
+contained validation. The bit-exact validation IS the Modal lane:
+
+    modal run scripts/gpu-validate-modal.py
+
+(See README.md "Status" → bit-exact rows for the latest result and
+the JSON it lands in.)
+
+For interactive use of the vLLM adapter on your CUDA box:
+    pip install "processfork-vllm[vllm]"
+    # then use pf.snapshot / pf.checkout from inside your vLLM process
+EOF
 exit 2

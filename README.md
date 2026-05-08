@@ -83,44 +83,66 @@ The **full 60-second demo** (snapshot → fork ×12 → merge → push → clone
 
 | Adapter | Status | What it gives you |
 |---------|--------|-------------------|
-| [Claude Code](./adapters/pf-claude-code/)         | ✅ ships now | `/snapshot`, `/fork`, `/merge` slash-commands inside any session |
-| [LangGraph](./adapters/pf-langgraph/)             | ✅ ships now | drop-in `BaseCheckpointSaver` (full 4-layer, not just state dict) |
-| [OpenInterpreter](./adapters/pf-openinterpreter/) | ✅ ships now | `interpreter.snapshot("pre-rm-rf")` then `.checkout("pre-rm-rf")` |
-| [AutoGen](./adapters/pf-autogen/)                 | ✅ ships now | atomic snapshot across a whole agent group's state |
-| [CrewAI](./adapters/pf-crewai/)                   | ✅ ships now | `CrewMemory` drop-in; every step time-travelable |
-| [vLLM](./adapters/pf-vllm/)                       | ✅ ships now | bit-exact KV-cache snapshot/restore (V0 + V1 engine via collective_rpc) |
-| [SGLang](./adapters/pf-sglang/)                   | ✅ ships now | live RadixCache `k_buffer`/`v_buffer` capture, mock-mode parity tests |
+| [Claude Code](./adapters/pf-claude-code/)         | ✅ ships v1.0 | `/snapshot`, `/fork`, `/merge` slash-commands inside any session |
+| [LangGraph](./adapters/pf-langgraph/)             | ✅ ships v1.0 | drop-in `BaseCheckpointSaver` over the FS+env+trace+effects layers |
+| [OpenInterpreter](./adapters/pf-openinterpreter/) | ✅ ships v1.0 | `interpreter.snapshot("pre-rm-rf")` then `.checkout("pre-rm-rf")` |
+| [AutoGen](./adapters/pf-autogen/)                 | ✅ ships v1.0 | atomic FS+env+trace+effects snapshot across an agent group |
+| [CrewAI](./adapters/pf-crewai/)                   | ✅ ships v1.0 | `CrewMemory` drop-in; every step time-travelable |
+| [vLLM](./adapters/pf-vllm/)                       | 🟡 mock ships v1.0 · live = Modal lane | mock: K/V page bytes + manifest persist & restore via the SDK; live (Modal A10G): V0 engine bit-exact, V1 engine output-equivalent (see "What does/doesn't ship" below) |
+| [SGLang](./adapters/pf-sglang/)                   | 🟡 mock ships v1.0 · live = Modal lane | mock: RadixCache `k_buffer`/`v_buffer` page round-trip; live: scaffolded — Modal lane reaches the parity stub but full radix-tree replay is v1.1 |
 
 ## How it works
 
-ProcessFork captures the **five things** that together make up a live agent — atomically — into one content-addressed file:
+ProcessFork captures the **five things** that together make up a live agent — atomically — into one content-addressed file. Each layer ships at a different maturity level in v1.0.x:
 
-| Layer       | What it captures                                                |
-|-------------|-----------------------------------------------------------------|
-| **Model**   | LoRA / IA³ / full-finetune weight diffs, in-place TTT updates   |
-| **Cache**   | Paged KV-cache, content-addressed per page (CoW across forks)   |
-| **World**   | Filesystem, env, in-flight subprocesses, browser DOM            |
-| **Effects** | Append-only ledger of irreversible tool calls (HMAC-chained)    |
-| **Trace**   | Chat + tool-call message log                                    |
+| Layer       | What it captures                                                | v1.0.x status |
+|-------------|-----------------------------------------------------------------|---------------|
+| **World**   | Filesystem (full), env (default-redacted), browser DOM (CDP). In-flight subprocesses **are not** captured by `pf snapshot` — the `procs` blob writes a `procs.unsupported.v1` placeholder unless a CRIU/zombie-restart adapter is wired in. | ✅ FS + env ship; procs = placeholder |
+| **Effects** | Append-only ledger of tool calls, HMAC-chained per entry (ACRFence). | ✅ ships (CLI + Python SDK + TS SDK + 5 adapters) |
+| **Trace**   | Chat + tool-call message log                                    | ✅ ships |
+| **Model**   | LoRA / IA³ / full-finetune weight diffs, in-place TTT updates. The format and TIES+DARE merge math ship and are exercised on the Modal A10G lane; the **generic CLI snapshot path produces an empty LoRA envelope** because the layer is populated by adapters (vLLM/SGLang/etc.), not by walking a directory. | 🟡 format ships; CLI path is placeholder; adapter-populated |
+| **Cache**   | Paged KV-cache, content-addressed per page (CoW across forks). Same shape: format + page math ship; the **generic CLI snapshot produces an empty page manifest**; the vLLM/SGLang adapters populate it for real. | 🟡 format ships; CLI path is placeholder; adapter-populated |
 
-Identical content shares storage automatically — 12 parallel forks use **~1.5×** the space of one, not 12×. The merge engine handles each layer with the right algorithm: git-style 3-way diff for files, TIES + DARE for model weights, an HMAC chain that defends against semantic-rollback attacks (ACRFence), and an LLM-summarized "what branch B learned" patch injected into branch A's reasoning trace without re-prefilling the cache.
+Identical content shares storage automatically — 12 parallel forks use **~1.004×** the space of one in the operator's matrix run, well under the < 1.5× budget. The merge engine handles each layer with the right algorithm: git-style 3-way diff for files (conflict markers materialize; resolution UI is v1.1), TIES + DARE for model weights, the HMAC effects chain that defends against semantic-rollback attacks (ACRFence), and an LLM-summarized "what branch B learned" patch injected into branch A's reasoning trace without re-prefilling the cache.
+
+### What does and doesn't ship in v1.0.x
+
+**Production-credible today** (independent retest, 12/12 matrix passing):
+
+- `pf snapshot` / `pf checkout` for filesystem sandboxes, with default secret-shaped env redaction.
+- HMAC-chained effects ledger end-to-end (CLI + Python + TS), tamper detected by `pf verify`.
+- Fork & merge: 12 forks at ~1.004× storage; clean and conflicting merges produce content-addressed merged CIDs with Git-style markers in conflict files.
+- File:// (and OCI / S3 / HF) registry transport.
+- 5 adapters (Claude Code, LangGraph, OpenInterpreter, AutoGen, CrewAI) over the FS + env + trace + effects layers.
+- vLLM/SGLang **mock** mode: K/V page bytes + manifest persist into the store and read back on checkout.
+
+**Not yet production-ready, though the format and code paths exist**:
+
+- **Live in-flight subprocess capture**. The world layer's `procs` blob is a placeholder (`procs.unsupported.v1`); a CRIU-based adapter is the v1.1 deliverable. Today, restored sessions do not bring back live PIDs; they bring back the FS + env + trace + effects state that lets a fresh worker continue.
+- **Local PF_HAS_GPU=1 vLLM/SGLang test** (`examples/06`, `examples/07`, `pf-cache/tests/cache_bit_exact_vllm.rs`). These exit 2 with a "use the adapter packages directly + Modal lane" pointer — they were operator-runs-it skeletons that never got a self-contained subprocess flow. The Modal A10G lane (`scripts/gpu-validate-modal.py`) **does** run vLLM end-to-end and emits the JSONs in [`benchmarks/gpu-validation/`](./benchmarks/gpu-validation/).
+- **Bit-exact KV-cache restore on vLLM V1 engine.** The Modal lane shows V0 engine **`bit_exact: true`** for 38 619 KV pages but **V1 engine = output-equivalent (first-80-chars match)**, not bit-exact, on TinyLlama-1.1B. V1 is using `collective_rpc` and the engine has its own non-determinism in deterministic mode that we do not yet eliminate. Treat live V1 KV restore as "lossy semantic restore" today.
+- **Conflict-merge resolution UI.** The merge engine writes Git-style `<<<<<<<` markers and emits a merged CID; an interactive `pf merge --resolve <cid>` flow is v1.1.
+- **Generic CLI model/cache layer capture.** The generic `pf snapshot` produces empty model + cache envelopes — these layers are populated through adapters, not by walking a directory. If you want the model+cache layers populated, use the vLLM or SGLang adapter from inside your engine process.
 
 → **[Architecture deep-dive](./docs/src/architecture.md)** · **[Three-way merge protocol](./docs/src/merge.md)** · **[Engineering specs](./agent_docs/)**
 
 ## Status
 
-`v1.0.10` tagged. Closes the two TypeScript SDK gaps the v1.0.9 retest flagged. CLI, Python SDK, and TypeScript SDK now all go through the same scrub regex and the same HMAC-chained `pf_effects::Ledger::append` code path — full parity across all three surfaces. Concretely: `snapshotFilesystem(store, kind, root, env, messages, opts?)` applies the default secret-shaped scrub regex (so JS callers passing `{ OPENAI_API_KEY: "..." }` get safe-by-default redaction), and `opts.effects = [...]` routes every tool call through the HMAC chain (was previously a hardcoded empty blob regardless of input — TS integrations had no ACRFence protection at all). New `readBlob` SDK surface to mirror the Python `read_blob`. The smoke-test bug that hid the leak (`new Map(...)` silently serialized to `{}` over napi) is fixed and replaced with 3 regression tests proving the exact attack patterns the auditor reported. `cargo deny check`: `advisories ok, bans ok, licenses ok, sources ok`. Earlier rounds' fixes still apply (CLI scrub + ledger, Python SDK scrub + ledger, vLLM/SGLang persistence, cargo-audit clear).
+`v1.0.11` tagged. Documentation honesty pass after the v1.0.10 retest: the README's "ships now" framing on vLLM/SGLang and the "bit-exact" metric row were not telling the same story as `benchmarks/gpu-validation/*.json` and the `examples/06`+`07` runners that exit 2 under `PF_HAS_GPU=1`. This release does not change runtime behavior — the v1.0.10 fixes (TS SDK scrub + HMAC ledger), v1.0.9 fixes (Python SDK scrub + HMAC ledger), and earlier audit-round fixes all stand. What it changes: the adapter status table separates **mock** from **live (Modal lane)**; the 5-layer table marks **Model** and **Cache** as adapter-populated (the generic CLI path emits empty envelopes); a new "What does and doesn't ship in v1.0.x" subsection makes the boundary explicit (no in-flight subprocess capture; no local PF_HAS_GPU=1 self-contained vLLM test; no V1-engine bit-exactness; no conflict-resolution UI). The example runners and the `cache_bit_exact_vllm.rs` panic message are also updated to point at the actually-true status. `cargo deny check`: still `advisories ok, bans ok, licenses ok, sources ok`.
 
 | metric                                                 | observed                 | target           |
 |--------------------------------------------------------|--------------------------|------------------|
 | Snapshot p50, synthetic 4-layer fixture (macOS arm64)  | **7.9 ms**               | < 500 ms p99     |
 | Snapshot p50, real GPU host (Modal A10G, 64 × 4 KiB)   | **42 ms** (warm)         | < 500 ms p99     |
-| **Bit-exact KV-cache replay**, vLLM 0.6.6 + TinyLlama-1.1B on A10G | **✅ verified** — 38 619 KV pages snapshotted, restored, regenerated text byte-identical | `out_a == out_b` |
+| KV-cache restore, **vLLM V0 engine** + TinyLlama-1.1B on A10G | **`bit_exact: true`** — 38 619 KV pages, regenerated text byte-identical ([JSON](./benchmarks/gpu-validation/2026-05-06-modal-a10g.json)) | `out_a == out_b` byte-equal |
+| KV-cache restore, **vLLM V1 engine** (`collective_rpc`) | **output-equivalent, not bit-exact** — first-80-chars match across snapshot/restore on 38 599 KV pages ([JSON](./benchmarks/gpu-validation/2026-05-06-modal-a10g-vllm-v1.json)); `bit_exact: false` field is the source of truth | `out_a == out_b` byte-equal (target unmet on V1) |
 | Cache capture, 64 pages                                | 531 µs                   | —                |
-| 12-fork ÷ 1-fork storage ratio                         | well < 1.5×              | ≤ 1.5×           |
-| Total tests passing                                    | **200**                  | —                |
+| 12-fork ÷ 1-fork storage ratio (auditor's matrix)      | **1.004×**               | ≤ 1.5×           |
+| Total Rust tests passing                               | **199**                  | —                |
+| Python SDK + Claude adapter tests                      | **17**                   | —                |
+| TS SDK smoke tests                                     | **8** (incl. 3 v1.0.10 regressions) | —     |
 
-Synthetic-fixture numbers come from `cargo bench --workspace`. GPU numbers come from `modal run scripts/gpu-validate-modal.py`; raw JSON lives in [`benchmarks/gpu-validation/`](./benchmarks/gpu-validation/) and the breakdown in [`benchmarks/RESULTS.md`](./benchmarks/RESULTS.md). vLLM ≥0.10 (V1 engine, subprocess-worker architecture) is the v1.0.2 milestone — the v1.0.1 adapter targets V0's directly-introspectable `CacheEngine`.
+Synthetic-fixture numbers come from `cargo bench --workspace`. GPU numbers come from `modal run scripts/gpu-validate-modal.py`; raw JSON lives in [`benchmarks/gpu-validation/`](./benchmarks/gpu-validation/) and the breakdown in [`benchmarks/RESULTS.md`](./benchmarks/RESULTS.md). The local PF_HAS_GPU=1 paths in `examples/06` and `examples/07` are not the validation path — they exit 2 with a Modal-lane pointer; the validation IS the Modal lane, and the JSONs above are its output.
 
 ## Install
 

@@ -4,6 +4,100 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.0.11] — 2026-05-07
+
+Documentation honesty pass. The v1.0.10 retest confirmed 12/12 of the
+real-world matrix (FS snapshots, env redaction, HMAC ledger tamper
+detection, 12 forks at 1.004× storage, clean+conflict merges, file://
+registry, GC, symlink hardening, quiesce/resume, large binaries) but
+flagged that the README's "vLLM/SGLang ✅ ships now / bit-exact KV"
+framing and the example/test stubs labelled "v1.0.1 deferred
+deliverable" did not match what actually shipped.
+
+This release does **not** change runtime behavior. All earlier audit
+fixes still stand. What changes:
+
+### README: adapter status table now distinguishes mock vs. live
+
+- Claude Code / LangGraph / OpenInterpreter / AutoGen / CrewAI keep
+  ✅ — they snapshot/restore the FS + env + trace + effects layers
+  and the auditor's matrix exercised them end-to-end.
+- vLLM / SGLang downgraded from ✅ to **🟡 mock ships v1.0 · live =
+  Modal lane**. The mock K/V page round-trip ships and is regression-
+  tested; the bit-exact validation runs on Modal A10G via
+  `scripts/gpu-validate-modal.py`, not from your local box.
+
+### README: 5-layer table now marks adapter-populated layers
+
+- **World** annotated: FS + env ship; the `procs` blob writes a
+  `procs.unsupported.v1` placeholder unless a CRIU/zombie-restart
+  adapter is added (a v1.1 deliverable). Restored sessions do not
+  bring back live PIDs; they bring back the FS+env+trace+effects
+  state that lets a fresh worker continue.
+- **Model** and **Cache** annotated 🟡: format + math ship and run
+  on the Modal lane, but the **generic CLI snapshot path emits
+  empty envelopes** because these layers are populated by adapters
+  (vLLM/SGLang/etc.), not by walking a directory.
+
+### README: bit-exact KV claim split V0 vs V1
+
+- v1.0.10 had one row claiming "Bit-exact KV-cache replay ✅ verified".
+  The Modal JSONs say something more specific:
+  - `2026-05-06-modal-a10g.json` (V0 engine, TinyLlama-1.1B):
+    `bit_exact: true`, 38 619 KV pages, byte-identical regen text.
+  - `2026-05-06-modal-a10g-vllm-v1.json` (V1 engine, `collective_rpc`):
+    `bit_exact: false`; first-80-chars of regen output match across
+    snapshot/restore (output-equivalent, not bit-exact).
+- README now has both rows, each linking to the source-of-truth JSON.
+  Treat live V1 KV restore as "lossy semantic restore" today.
+
+### README: new "What does and doesn't ship in v1.0.x" subsection
+
+- Production-credible today (auditor's 12/12 matrix): pf snapshot/
+  checkout for FS sandboxes; default secret-shaped env redaction
+  (CLI + Python SDK + TS SDK); HMAC-chained effects ledger end-to-end
+  with `pf verify` tamper detection; fork & merge incl. conflict
+  marker materialization; file:// + OCI + S3 + HF registry transport;
+  5 first-party adapters; vLLM/SGLang mock-mode K/V page persistence.
+- Not yet production-ready, made explicit: in-flight subprocess
+  capture (CRIU adapter is v1.1); local PF_HAS_GPU=1 self-contained
+  vLLM/SGLang test (it was always Modal-lane validation, the
+  examples/06+07 + cache_bit_exact_vllm.rs were skeletons mislabelled
+  "v1.0.1 deferred"); V1-engine bit-exact KV restore (output-
+  equivalent only); conflict-merge resolution UI (markers ship,
+  interactive `pf merge --resolve` is v1.1); generic CLI model+cache
+  layer capture (adapter-populated only).
+
+### Skeleton/stub messages updated
+
+- `examples/06-vllm-bit-exact/run.sh` and
+  `examples/07-sglang-prefix-share/run.sh`: removed the misleading
+  "v1.0.1 deferred deliverable" pointer; both now point at
+  `modal run scripts/gpu-validate-modal.py` and the JSONs in
+  `benchmarks/gpu-validation/`, which is the actual validation path.
+- `crates/pf-cache/tests/cache_bit_exact_vllm.rs`: previously
+  `panic!("PF_HAS_GPU=1 set but pf-vllm adapter not yet wired")`.
+  Now skips cleanly under any value of `PF_HAS_GPU` and points at
+  the Modal lane + `tests/cache_round_trip.rs` (the on-host proxy
+  that DOES exercise the cache code path everywhere).
+
+### Versions
+
+- `processfork` (Rust + Python wheel): 1.0.10 → **1.0.11**
+- All 8 internal `pf-*` crate version pins: → 1.0.11
+- npm `@processfork/sdk`: 1.0.10 → **1.0.11**
+
+### Why this matters
+
+The runtime behavior in v1.0.10 was correct and the auditor's matrix
+agreed. The README and a handful of stub messages were overselling.
+Documentation that can't be matched against `cargo test`,
+`benchmarks/gpu-validation/*.json`, or the example runners is the
+same kind of trust hole as a code bug — operators who read the README
+were going to spend a day chasing a "ships now" GPU validation that
+the Modal lane already ran for them. v1.0.11 makes the boundary
+match the reality.
+
 ## [1.0.10] — 2026-05-07
 
 Closes the two TypeScript-SDK gaps the v1.0.9 retest flagged. v1.0.7

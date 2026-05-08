@@ -9,26 +9,33 @@ set -euo pipefail
 
 if [[ "${PF_HAS_GPU:-0}" != "1" ]]; then
     cat <<'EOF'
-┌─ ProcessFork example 07: sglang-prefix-share ─────────────
-│ skipped: needs PF_HAS_GPU=1 + a CUDA host + sglang ≥ 0.5.
+┌─ ProcessFork example 07: sglang-prefix-share (v1.0.x: Modal lane) ─
+│ This example is a SKELETON. It does not run a self-contained
+│ SGLang prefix-share validation on your local box.
 │
-│ Demonstrates that snapshot/restore preserves the SGLang
-│ RadixAttention prefix tree — two requests sharing a 1000-token
-│ system prompt continue to share their cache pages after restore.
+│ The validation runs on Modal:
+│   modal run scripts/gpu-validate-modal.py
 │
-│ Runs (when PF_HAS_GPU=1):
-│   1. python -m sglang.launch_server --model Llama-3-8B --deterministic-mode
-│   2. fire 2 requests sharing a 1000-token prefix; verify prefix is shared
-│   3. POST /processfork/snapshot                            → cid
-│   4. kill server
-│   5. fresh server; POST /processfork/checkout cid
-│   6. fire same 2 requests; verify prefix is STILL shared (page table
-│      reconstructed)
+│ Latest result: SGLang live FFI is scaffolded; Modal lane reaches
+│ the parity stub. Full radix-tree replay across snapshot/restore
+│ is v1.1 — see README "What does and doesn't ship in v1.0.x".
+│
+│ For interactive use of the SGLang adapter today, install
+│ processfork-sglang[sglang] and call the SDK from inside your
+│ engine process. The mock-mode page round-trip is regression-
+│ tested in tests/.
 └─
 EOF
     exit 0
 fi
 
-echo "PF_HAS_GPU=1 set, but the sglang live wiring is the v1.0.1 deferred deliverable."
-echo "See adapters/pf-sglang/README.md."
+cat <<'EOF'
+PF_HAS_GPU=1 was set, but examples/07 has never been a local self-
+contained validation. Use the Modal lane:
+
+    modal run scripts/gpu-validate-modal.py
+
+For interactive use of the SGLang adapter on your CUDA box:
+    pip install "processfork-sglang[sglang]"
+EOF
 exit 2
