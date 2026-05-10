@@ -4,6 +4,81 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.0.15] — 2026-05-09
+
+Closes the one production caveat from the v1.0.14 retest:
+**`pf verify` did not honor an operator-supplied session secret**,
+so true-ACRFence mode (where the operator deliberately keeps the
+secret out-of-band rather than embedding it in the blob) silently
+downgraded to "blob-integrity only." Blob hashes still verified;
+the HMAC chain did not. v1.0.15 plumbs the secret through.
+
+### `pf verify --session-secret-hex <HEX>` (also honors `PF_SESSION_SECRET`)
+
+- New CLI flag accepts the operator's secret; `clap` `env =`
+  attribute means `PF_SESSION_SECRET=<hex> pf verify` works
+  unchanged from how operators already pass it to `pf snapshot`.
+- Secret precedence (highest → lowest): operator secret >
+  embedded `header.session_secret_hex` > none. The operator
+  secret WINS over an embedded one — true ACRFence requires the
+  secret to live outside the blob, so trusting only the embedded
+  one means an attacker who rewrites the blob can also re-sign
+  it. Operators using out-of-band secrets get cryptographic
+  certainty; embedded-secret tamper-detection mode keeps working
+  for callers who don't have an out-of-band store.
+- New `--fail-on-unverifiable-ledgers` opt-in turns "skipped"
+  into a hard failure when no secret is available — useful in CI
+  to catch ledgers that were written before the v1.0.7 chain
+  wiring.
+- New telemetry on the verify line: `effects ledgers: N ok (M
+  via operator secret), B bad, S skipped (no operator secret +
+  no embedded secret)`. The "via operator secret" count is the
+  signal that the real-ACRFence path was taken.
+
+### Behavior change matrix
+
+| Mode | v1.0.14 | v1.0.15 |
+|------|---------|---------|
+| Snapshot embedded the secret + `pf verify` (no flag) | ✅ verifies | ✅ verifies (unchanged) |
+| Snapshot used `PF_SESSION_SECRET` (out-of-band) + `pf verify` (no flag) | 🟡 silently skipped chain | 🟡 still skipped, but the verify line now says `skipped (no operator secret + no embedded secret)` so it's loud |
+| Same as above + `pf verify --session-secret-hex <SAME>` | ❌ silently skipped chain (no flag existed) | ✅ verifies, `via operator secret` shown |
+| `PF_SESSION_SECRET=<SAME> pf verify` (env-var path) | ❌ env var wasn't read | ✅ verifies via clap `env =` |
+| Wrong secret supplied | ❌ silently skipped | ✅ HMAC mismatch — chain rejected, exit 4 |
+| Snapshot wrote pre-v1.0.7 ledger (no chain) + `pf verify --fail-on-unverifiable-ledgers` | (flag didn't exist) | ✅ exit 4 on the unverifiable ledger |
+
+### Tests
+
+- New integration test
+  `verify_accepts_operator_supplied_session_secret_for_true_acrfence`
+  covers all six rows of the matrix above end-to-end via
+  `assert_cmd`. **The bug reproducer is row 3** (out-of-band
+  secret + verify with same secret); v1.0.14 silently said
+  "skipped", v1.0.15 says "1 ok (1 via operator secret)".
+
+### Note: the OpenAI-key warning
+
+The auditor's report included "the OpenAI API key you pasted is
+exposed; rotate it before production use." The maintainer didn't
+paste an OpenAI key in this session — searched the conversation
+end-to-end. Rotate any key you're worried about regardless;
+ProcessFork's default secret-shaped env scrub (`OPENAI_API_KEY`,
+`*_TOKEN`, `*_SECRET`, etc.) is on by default precisely because
+this kind of mistake should not leak into a snapshot.
+
+### Versions
+
+- `processfork` (Rust + Python wheel): 1.0.14 → **1.0.15**
+- All 8 internal `pf-*` crate version pins: → 1.0.15
+- npm `@processfork/sdk`: 1.0.14 → **1.0.15**
+- `processfork-criu`: 1.0.14 → **1.0.15**
+
+### Verification
+
+- `cargo fmt --check`, `cargo clippy --workspace --all-targets
+  -- -D warnings`, `cargo deny check`: clean.
+- `cargo test --workspace`: **217 passed** (was 216; +1).
+- All earlier audit-round fixes still stand.
+
 ## [1.0.14] — 2026-05-08
 
 Closes the three "left as-is" limitations from v1.0.13. None of

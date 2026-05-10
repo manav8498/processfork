@@ -775,6 +775,103 @@ fn snapshot_scrub_env_redacts_matching_keys() {
     );
 }
 
+/// v1.0.15: `pf verify` must accept an operator-supplied session
+/// secret (`--session-secret-hex` or `PF_SESSION_SECRET`) so true
+/// ACRFence mode (secret kept out-of-band, NOT embedded in the
+/// blob) actually validates the HMAC chain. Prior versions silently
+/// reported the chain as "skipped" because the embedded
+/// session_secret_hex was absent — exactly the case where the
+/// operator most needed validation.
+#[test]
+fn verify_accepts_operator_supplied_session_secret_for_true_acrfence() {
+    let store = TempDir::new().unwrap();
+    let sandbox = TempDir::new().unwrap();
+    make_sandbox(sandbox.path());
+
+    // 32-byte hex secret. The CLI's snapshot path detects
+    // PF_SESSION_SECRET in env and writes the ledger WITHOUT
+    // embedding it — that's the real-ACRFence path.
+    let secret_hex = "0123456789abcdef".repeat(4); // 64 hex chars = 32 bytes
+    let effects_path = sandbox.path().join("effects.jsonl");
+    std::fs::write(
+        &effects_path,
+        r#"{"tool_id":"send_email","args_hash":"sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855","result_hash":"sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855","idempotency_key":"msg-001","side_effect_class":"irreversible"}"#,
+    )
+    .unwrap();
+
+    pf(store.path())
+        .env("PF_SESSION_SECRET", &secret_hex)
+        .args(["snapshot", "--agent-id", "t", "--fs-root"])
+        .arg(sandbox.path())
+        .args(["--effects-from-jsonl"])
+        .arg(&effects_path)
+        .assert()
+        .success();
+
+    // Without the secret, pf verify reports the ledger as skipped
+    // (no embedded secret in real-ACRFence mode).
+    let out_no_secret = pf(store.path())
+        .arg("verify")
+        .assert()
+        .success()
+        .get_output()
+        .clone();
+    let stdout_no_secret = String::from_utf8(out_no_secret.stdout).unwrap();
+    assert!(
+        stdout_no_secret.contains("0 ok"),
+        "without operator secret + no embedded secret, chain must be skipped \
+         (not silently 'verified'); got: {stdout_no_secret}"
+    );
+    assert!(
+        stdout_no_secret.contains("skipped"),
+        "skipped count must be reported"
+    );
+
+    // With the same operator secret, pf verify validates the chain.
+    let out_with_secret = pf(store.path())
+        .args(["verify", "--session-secret-hex", &secret_hex])
+        .assert()
+        .success()
+        .get_output()
+        .clone();
+    let stdout_with = String::from_utf8(out_with_secret.stdout).unwrap();
+    assert!(
+        stdout_with.contains("via operator secret"),
+        "v1.0.15 telemetry must show operator-secret path was taken; got: {stdout_with}"
+    );
+    // The "1 ok" count comes from the single ledger we just wrote.
+    assert!(
+        stdout_with.contains("1 ok") || stdout_with.contains("ok (1 via"),
+        "1 chain must verify with operator secret; got: {stdout_with}"
+    );
+
+    // The PF_SESSION_SECRET env var is also accepted (clap `env =`).
+    pf(store.path())
+        .env("PF_SESSION_SECRET", &secret_hex)
+        .arg("verify")
+        .assert()
+        .success()
+        .stdout(contains("via operator secret"));
+
+    // A wrong operator secret must REJECT the chain (HMAC mismatch),
+    // not silently skip.
+    let wrong_secret = "ff".repeat(32);
+    pf(store.path())
+        .args(["verify", "--session-secret-hex", &wrong_secret])
+        .assert()
+        .failure()
+        .stderr(contains("HMAC chain"));
+
+    // --fail-on-unverifiable-ledgers turns "skipped" into a failure
+    // when no secret is available — useful in CI to catch ledgers
+    // that were written without the v1.0.7 chain wiring.
+    pf(store.path())
+        .args(["verify", "--fail-on-unverifiable-ledgers"])
+        .assert()
+        .failure()
+        .stderr(contains("no verifiable HMAC chain"));
+}
+
 /// v1.0.14: `pf snapshot --respawn-pid <PID>` is a portable
 /// subprocess-capture path that works on macOS and Linux without
 /// requiring CRIU. Captures argv / cwd / env / fd paths, NOT live
